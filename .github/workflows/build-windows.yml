@@ -19,7 +19,7 @@ jobs:
           ref: ${{ github.event.client_payload.commit }}
 
       - name: Cache Rust dependencies
-        uses: actions/cache@v1.1.2
+        uses: actions/cache@v2
         with:
           path: target
           key: ${{ runner.OS }}-build-${{ hashFiles('**\Cargo.lock') }}
