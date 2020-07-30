@@ -2,6 +2,7 @@ mod apply_migration;
 mod calculate_database_steps;
 mod calculate_datamodel;
 mod command;
+mod create_migration;
 mod debug_panic;
 mod infer_migration_steps;
 mod list_migrations;
