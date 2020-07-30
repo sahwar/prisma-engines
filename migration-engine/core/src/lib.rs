@@ -1,11 +1,11 @@
-#![deny(rust_2018_idioms)]
-#![deny(unsafe_code)]
+#![deny(rust_2018_idioms, unsafe_code)]
 
 pub mod api;
 pub mod commands;
 pub mod error;
 pub mod migration;
 pub mod migration_engine;
+mod migrations_folder;
 
 pub use api::GenericApi;
 pub use commands::{ApplyMigrationInput, InferMigrationStepsInput, MigrationStepsResultOutput};
