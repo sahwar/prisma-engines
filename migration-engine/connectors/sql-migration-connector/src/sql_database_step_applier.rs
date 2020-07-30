@@ -45,6 +45,30 @@ impl DatabaseMigrationStepApplier<SqlMigration> for SqlDatabaseStepApplier<'_> {
             &database_migration.after,
         )
     }
+
+    fn render_migration_script(&self, database_migration: &SqlMigration) -> (&'static str, String) {
+        // Assume a reasonable baseline of 20 characters per migration step.
+        let mut migration_script = String::with_capacity(database_migration.corrected_steps.len() * 20);
+
+        for step in &database_migration.corrected_steps {
+            let statements = render_raw_sql(
+                &step,
+                self.flavour(),
+                self.database_info(),
+                &database_migration.before,
+                &database_migration.after,
+            )
+            .map_err(|err: anyhow::Error| ConnectorError::from_kind(migration_connector::ErrorKind::Generic(err)))
+            .unwrap();
+
+            for statement in statements {
+                migration_script.push_str(&statement);
+                migration_script.push_str(";\n");
+            }
+        }
+
+        ("sql", migration_script)
+    }
 }
 
 impl SqlDatabaseStepApplier<'_> {
