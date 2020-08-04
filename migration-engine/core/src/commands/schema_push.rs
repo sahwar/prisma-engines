@@ -7,6 +7,7 @@ use migration_connector::{
     DatabaseMigrationMarker, DatabaseMigrationStepApplier, DestructiveChangeDiagnostics, MigrationConnector,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha512};
 
 pub struct SchemaPushCommand<'a> {
     pub input: &'a SchemaPushInput,
@@ -34,18 +35,30 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
         let database_migration = inferrer.infer(&schema, &schema, &[]).await?;
         let checks = checker.check(&database_migration).await?;
 
+        if applier.migration_is_empty(&database_migration) {
+            tracing::info!("The generated database migration is empty.");
+            return Ok(SchemaPushOutput {
+                executed_steps: 0,
+                warnings: Vec::new(),
+                unexecutable: Vec::new(),
+            });
+        }
+
         // Create/overwrite the migration file, if the project is using migrations.
         if let Some(path) = input.migrations_folder_path.as_ref().map(std::path::Path::new) {
-            let persistence = connector.migration_persistence();
             let filesystem_migrations = list_migrations(path).map_err(|err| CommandError::Generic(err.into()))?;
-            let applied_migrations = persistence.load_all().await?;
+            let applied_migrations = connector.read_imperative_migrations().await?;
 
             for (idx, filesystem_migration) in filesystem_migrations.iter().enumerate() {
                 if let Some(applied_migration) = applied_migrations.get(idx) {
-                    if !filesystem_migration.matches_applied_migration(applied_migration) {
-                        todo!("Migrations don't match")
+                    if !filesystem_migration
+                        .matches_applied_migration(applied_migration)
+                        .map_err(|err| CommandError::Generic(err.into()))?
+                    {
+                        return Err(CommandError::Generic(anyhow::anyhow!("Migration `{filesystem_migration}` does not match the `{applied_migration}` migration applied in the database.", filesystem_migration = filesystem_migration.migration_id(), applied_migration = applied_migration.name)));
                     }
                 } else {
+                    tracing::debug!("Applying saved migration `{}`", filesystem_migration.migration_id());
                     let script = filesystem_migration
                         .read_migration_script()
                         .map_err(|err| CommandError::Generic(err.into()))?;
@@ -54,6 +67,7 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
                 }
             }
 
+            let (extension, script) = applier.render_migration_script(&database_migration);
             let executed_steps = apply_to_dev_database(&database_migration, &checks, input, applier.as_ref()).await?;
 
             if !path.exists() {
@@ -62,12 +76,18 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
                 )));
             }
 
-            let (extension, script) = applier.render_migration_script(&database_migration);
             let folder = create_migration_folder(path, "draft").map_err(|err| CommandError::Generic(err.into()))?;
 
             folder
                 .write_migration_script(&script, extension)
                 .map_err(|err| CommandError::Generic(err.into()))?;
+
+            let mut hasher = Sha512::new();
+            hasher.update(&script);
+            let checksum = hasher.finalize();
+            connector
+                .persist_imperative_migration("draft", checksum.as_ref(), &script)
+                .await?;
 
             Ok(SchemaPushOutput {
                 executed_steps,

@@ -20,6 +20,7 @@ pub use migration_applier::*;
 pub use migration_persistence::*;
 pub use steps::MigrationStep;
 
+use chrono::Utc;
 use std::fmt::Debug;
 
 /// The top-level trait for connectors. This is the abstraction the migration engine core relies on to
@@ -80,6 +81,18 @@ pub trait MigrationConnector: Send + Sync + 'static {
         };
         Box::new(applier)
     }
+
+    async fn persist_imperative_migration(&self, name: &str, checksum: &[u8], script: &str) -> ConnectorResult<()>;
+    async fn read_imperative_migrations(&self) -> ConnectorResult<Vec<ImperativeMigration>>;
+}
+
+#[derive(Debug)]
+pub struct ImperativeMigration {
+    pub script: String,
+    pub name: String,
+    pub checksum: Vec<u8>,
+    pub started_at: Option<chrono::DateTime<Utc>>,
+    pub finished_at: Option<chrono::DateTime<Utc>>,
 }
 
 pub trait DatabaseMigrationMarker: Debug + Send + Sync {

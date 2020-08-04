@@ -78,6 +78,10 @@ impl DatabaseMigrationStepApplier<SqlMigration> for SqlDatabaseStepApplier<'_> {
         )
         .await
     }
+
+    fn migration_is_empty(&self, migration: &SqlMigration) -> bool {
+        migration.corrected_steps.is_empty()
+    }
 }
 
 impl SqlDatabaseStepApplier<'_> {

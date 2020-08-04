@@ -26,3 +26,4 @@ user-facing-errors = { path = "../../../libs/user-facing-errors", features = ["s
 tracing-error = "0.1.2"
 url = "2.1.1"
 futures = "0.3.5"
+sha2 = "0.9.1"

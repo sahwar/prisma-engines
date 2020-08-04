@@ -20,7 +20,7 @@ impl<'a> MigrationCommand for CreateMigrationCommand {
         C: migration_connector::MigrationConnector<DatabaseMigration = D>,
         D: migration_connector::DatabaseMigrationMarker + Send + Sync + 'static,
     {
-        let connector = engine.connector();
+        let _connector = engine.connector();
 
         todo!()
     }

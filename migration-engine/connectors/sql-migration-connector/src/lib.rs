@@ -77,6 +77,10 @@ impl SqlMigrationConnector {
 
         self.flavour.describe_schema(schema_name, conn).await
     }
+
+    async fn ensure_imperative_migrations_table(&self) -> SqlResult<()> {
+        self.flavour().ensure_imperative_migrations_table(self.conn()).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -134,6 +138,61 @@ impl MigrationConnector for SqlMigrationConnector {
 
     fn deserialize_database_migration(&self, json: serde_json::Value) -> Option<SqlMigration> {
         serde_json::from_value(json).ok()
+    }
+
+    async fn persist_imperative_migration(&self, name: &str, checksum: &[u8], script: &str) -> ConnectorResult<()> {
+        let fut = async {
+            self.ensure_imperative_migrations_table().await?;
+
+            let insert = quaint::ast::Insert::single_into((self.schema_name(), "prisma_imperative_migrations"))
+                .value("script", script)
+                .value("checksum", checksum)
+                .value("name", name);
+
+            self.conn().execute(insert.into()).await?;
+
+            Ok(())
+        };
+
+        catch(self.connection_info(), fut).await
+    }
+
+    async fn read_imperative_migrations(&self) -> ConnectorResult<Vec<ImperativeMigration>> {
+        let fut = async {
+            self.ensure_imperative_migrations_table().await?;
+
+            let query = quaint::ast::Select::from_table((self.schema_name(), "prisma_imperative_migrations"))
+                .column("script")
+                .column("name")
+                .column("checksum")
+                .column("startedAt")
+                .column("finishedAt");
+
+            let rows = self.conn().query(query.into()).await?;
+
+            let migrations: Option<Vec<ImperativeMigration>> = rows
+                .into_iter()
+                .map(|row| {
+                    Some(ImperativeMigration {
+                        script: row.get("script")?.as_str()?.into(),
+                        name: row.get("name")?.as_str()?.into(),
+                        checksum: row.get("checksum")?.as_bytes()?.into(),
+                        started_at: row
+                            .get("startedAt")
+                            .and_then(|value| value.as_datetime())
+                            .map(|v| v.into()),
+                        finished_at: row
+                            .get("finishedAt")
+                            .and_then(|value| value.as_datetime())
+                            .map(|v| v.into()),
+                    })
+                })
+                .collect();
+
+            Ok(migrations.expect("failed to fetch migrations"))
+        };
+
+        catch(self.connection_info(), fut).await
     }
 }
 

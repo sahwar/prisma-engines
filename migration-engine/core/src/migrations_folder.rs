@@ -4,9 +4,9 @@
 //!
 //! - A migration script
 
-use migration_connector::Migration;
+use migration_connector::ImperativeMigration;
+use sha2::{Digest, Sha512};
 use std::{
-    ffi::OsStr,
     fs::{create_dir, read_dir, DirEntry},
     io::{self, Write as _},
     path::{Path, PathBuf},
@@ -75,13 +75,19 @@ impl MigrationFolder {
             .expect("Migration folder name is not valid UTF-8.")
     }
 
-    pub(crate) fn matches_applied_migration(&self, applied_migration: &Migration) -> bool {
-        applied_migration.name == self.migration_id()
+    #[tracing::instrument]
+    pub(crate) fn matches_applied_migration(&self, applied_migration: &ImperativeMigration) -> io::Result<bool> {
+        let filesystem_script = self.read_migration_script()?;
+        let mut hasher = Sha512::new();
+        hasher.update(&filesystem_script);
+        let filesystem_script_checksum = hasher.finalize();
+
+        Ok(applied_migration.checksum == filesystem_script_checksum.as_ref())
     }
 
     #[tracing::instrument]
     pub(crate) fn write_migration_script(&self, script: &str, extension: &str) -> std::io::Result<()> {
-        let mut path = self.0.join("migration");
+        let mut path = self.0.join(MIGRATION_SCRIPT_FILENAME);
 
         path.set_extension(extension);
 
@@ -93,7 +99,7 @@ impl MigrationFolder {
 
     #[tracing::instrument]
     pub(crate) fn read_migration_script(&self) -> std::io::Result<String> {
-        std::fs::read_to_string(&self.0)
+        std::fs::read_to_string(&self.0.join("migration.sql"))
     }
 }
 
