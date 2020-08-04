@@ -49,9 +49,9 @@ impl DatabaseMigrationStepApplier<SqlMigration> for SqlDatabaseStepApplier<'_> {
 
     fn render_migration_script(&self, database_migration: &SqlMigration) -> (&'static str, String) {
         // Assume a reasonable baseline of 20 characters per migration step.
-        let mut migration_script = String::with_capacity(database_migration.corrected_steps.len() * 20);
+        let mut migration_script = String::with_capacity(database_migration.steps.len() * 20);
 
-        for step in &database_migration.corrected_steps {
+        for step in &database_migration.steps {
             let statements = render_raw_sql(
                 &step,
                 self.flavour(),
@@ -80,7 +80,7 @@ impl DatabaseMigrationStepApplier<SqlMigration> for SqlDatabaseStepApplier<'_> {
     }
 
     fn migration_is_empty(&self, migration: &SqlMigration) -> bool {
-        migration.corrected_steps.is_empty()
+        migration.steps.is_empty()
     }
 }
 

@@ -32,18 +32,6 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
         let applier = connector.database_migration_step_applier();
         let checker = connector.destructive_change_checker();
 
-        let database_migration = inferrer.infer(&schema, &schema, &[]).await?;
-        let checks = checker.check(&database_migration).await?;
-
-        if applier.migration_is_empty(&database_migration) {
-            tracing::info!("The generated database migration is empty.");
-            return Ok(SchemaPushOutput {
-                executed_steps: 0,
-                warnings: Vec::new(),
-                unexecutable: Vec::new(),
-            });
-        }
-
         // Create/overwrite the migration file, if the project is using migrations.
         if let Some(path) = input.migrations_folder_path.as_ref().map(std::path::Path::new) {
             let filesystem_migrations = list_migrations(path).map_err(|err| CommandError::Generic(err.into()))?;
@@ -67,20 +55,34 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
                 }
             }
 
-            let (extension, script) = applier.render_migration_script(&database_migration);
-            let executed_steps = apply_to_dev_database(&database_migration, &checks, input, applier.as_ref()).await?;
+            let database_migration = inferrer.infer(&schema, &schema, &[]).await?;
+            let checks = checker.check(&database_migration).await?;
 
-            if !path.exists() {
-                return Err(CommandError::Input(anyhow::anyhow!(
-                    "The provided migrations folder path does not exist."
-                )));
+            if applier.migration_is_empty(&database_migration) {
+                tracing::info!("The generated database migration is empty.");
+                return Ok(SchemaPushOutput {
+                    executed_steps: 0,
+                    warnings: Vec::new(),
+                    unexecutable: Vec::new(),
+                });
             }
+
+            let (extension, script) = applier.render_migration_script(&database_migration);
 
             let folder = create_migration_folder(path, "draft").map_err(|err| CommandError::Generic(err.into()))?;
 
             folder
                 .write_migration_script(&script, extension)
                 .map_err(|err| CommandError::Generic(err.into()))?;
+
+            tracing::debug!("Applying new migration `{}`", folder.migration_id());
+            applier.apply_migration_script(&script).await?;
+
+            if !path.exists() {
+                return Err(CommandError::Input(anyhow::anyhow!(
+                    "The provided migrations folder path does not exist."
+                )));
+            }
 
             let mut hasher = Sha512::new();
             hasher.update(&script);
@@ -90,7 +92,7 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
                 .await?;
 
             Ok(SchemaPushOutput {
-                executed_steps,
+                executed_steps: 1,
                 warnings: checks.warnings.into_iter().map(|warning| warning.description).collect(),
                 unexecutable: checks
                     .unexecutable_migrations
@@ -100,6 +102,19 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
             })
         } else {
             // Otherwise only apply the migration.
+
+            let database_migration = inferrer.infer(&schema, &schema, &[]).await?;
+            let checks = checker.check(&database_migration).await?;
+
+            if applier.migration_is_empty(&database_migration) {
+                tracing::info!("The generated database migration is empty.");
+                return Ok(SchemaPushOutput {
+                    executed_steps: 0,
+                    warnings: Vec::new(),
+                    unexecutable: Vec::new(),
+                });
+            }
+
             let executed_steps = apply_to_dev_database(&database_migration, &checks, input, applier.as_ref()).await?;
 
             Ok(SchemaPushOutput {
