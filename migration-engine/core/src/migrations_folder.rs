@@ -67,12 +67,16 @@ pub(crate) struct MigrationFolder(PathBuf);
 
 impl MigrationFolder {
     /// The `{timestamp}_{name}` formatted migration id.
-    pub(crate) fn migration_id(&self) -> &OsStr {
-        self.0.file_name().expect("MigrationFolder::migration_id")
+    pub(crate) fn migration_id(&self) -> &str {
+        self.0
+            .file_name()
+            .expect("MigrationFolder::migration_id")
+            .to_str()
+            .expect("Migration folder name is not valid UTF-8.")
     }
 
     pub(crate) fn matches_applied_migration(&self, applied_migration: &Migration) -> bool {
-        todo!()
+        applied_migration.name == self.migration_id()
     }
 
     #[tracing::instrument]

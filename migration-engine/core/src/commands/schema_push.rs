@@ -4,8 +4,7 @@ use crate::{
     parse_datamodel,
 };
 use migration_connector::{
-    DatabaseMigrationMarker, DatabaseMigrationStepApplier, DestructiveChangeDiagnostics, DestructiveChangesChecker,
-    MigrationConnector,
+    DatabaseMigrationMarker, DatabaseMigrationStepApplier, DestructiveChangeDiagnostics, MigrationConnector,
 };
 use serde::{Deserialize, Serialize};
 
