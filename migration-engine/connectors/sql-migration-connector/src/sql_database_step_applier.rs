@@ -1,4 +1,5 @@
 use crate::*;
+use futures::TryFutureExt;
 use sql_renderer::{rendered_step::RenderedStep, IteratorJoin, Quoted, RenderedAlterColumn};
 use sql_schema_describer::walkers::{find_column, walk_columns, ColumnWalker, SqlSchemaExt};
 use sql_schema_describer::{ColumnTypeFamily, Index, IndexType, SqlSchema};
@@ -68,6 +69,14 @@ impl DatabaseMigrationStepApplier<SqlMigration> for SqlDatabaseStepApplier<'_> {
         }
 
         ("sql", migration_script)
+    }
+
+    async fn apply_migration_script(&self, script: &str) -> ConnectorResult<()> {
+        crate::catch(
+            self.connection_info(),
+            self.conn().raw_cmd(script).map_err(SqlError::from),
+        )
+        .await
     }
 }
 

@@ -53,6 +53,8 @@ struct SchemaPush {
     schema_path: String,
     #[structopt(long)]
     force: bool,
+    #[structopt(long)]
+    migrations_folder_path: Option<String>,
 }
 
 #[tokio::main]
@@ -236,6 +238,7 @@ async fn schema_push(cmd: &SchemaPush) -> anyhow::Result<()> {
         .schema_push(&SchemaPushInput {
             schema,
             force: cmd.force,
+            migrations_folder_path: cmd.migrations_folder_path.clone(),
         })
         .await?;
 

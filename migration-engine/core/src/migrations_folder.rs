@@ -4,10 +4,11 @@
 //!
 //! - A migration script
 
+use migration_connector::Migration;
 use std::{
     ffi::OsStr,
     fs::{create_dir, read_dir, DirEntry},
-    io,
+    io::{self, Write as _},
     path::{Path, PathBuf},
 };
 
@@ -61,12 +62,34 @@ pub(crate) fn list_migrations(migrations_folder_path: &Path) -> io::Result<Vec<M
 
 /// Proxy to a folder containing one migration, as returned by
 /// `create_migration_folder` and `list_migrations`.
+#[derive(Debug)]
 pub(crate) struct MigrationFolder(PathBuf);
 
 impl MigrationFolder {
     /// The `{timestamp}_{name}` formatted migration id.
     pub(crate) fn migration_id(&self) -> &OsStr {
         self.0.file_name().expect("MigrationFolder::migration_id")
+    }
+
+    pub(crate) fn matches_applied_migration(&self, applied_migration: &Migration) -> bool {
+        todo!()
+    }
+
+    #[tracing::instrument]
+    pub(crate) fn write_migration_script(&self, script: &str, extension: &str) -> std::io::Result<()> {
+        let mut path = self.0.join("migration");
+
+        path.set_extension(extension);
+
+        let mut file = std::fs::File::create(&path)?;
+        file.write_all(script.as_bytes())?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument]
+    pub(crate) fn read_migration_script(&self) -> std::io::Result<String> {
+        std::fs::read_to_string(&self.0)
     }
 }
 
