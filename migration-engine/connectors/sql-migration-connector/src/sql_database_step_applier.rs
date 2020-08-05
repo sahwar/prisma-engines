@@ -62,6 +62,11 @@ impl DatabaseMigrationStepApplier<SqlMigration> for SqlDatabaseStepApplier<'_> {
             .map_err(|err: anyhow::Error| ConnectorError::from_kind(migration_connector::ErrorKind::Generic(err)))
             .unwrap();
 
+            if !statements.is_empty() {
+                migration_script.push('\n');
+                migration_script.push_str(&format!("/* {} */\n", step.description()));
+            }
+
             for statement in statements {
                 migration_script.push_str(&statement);
                 migration_script.push_str(";\n");

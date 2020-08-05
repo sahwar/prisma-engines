@@ -44,6 +44,25 @@ pub enum SqlMigrationStep {
     AlterEnum(AlterEnum),
 }
 
+impl SqlMigrationStep {
+    pub(crate) fn description(&self) -> &'static str {
+        match self {
+            SqlMigrationStep::AddForeignKey(_) => "AddForeignKey",
+            SqlMigrationStep::CreateTable(_) => "CreateTable",
+            SqlMigrationStep::AlterTable(_) => "AlterTable",
+            SqlMigrationStep::DropForeignKey(_) => "DropForeignKey",
+            SqlMigrationStep::DropTable(_) => "DropTable",
+            SqlMigrationStep::RenameTable { .. } => "RenameTable",
+            SqlMigrationStep::CreateIndex(_) => "CreateIndex",
+            SqlMigrationStep::DropIndex(_) => "DropIndex",
+            SqlMigrationStep::AlterIndex(_) => "AlterIndex",
+            SqlMigrationStep::CreateEnum(_) => "CreateEnum",
+            SqlMigrationStep::DropEnum(_) => "DropEnum",
+            SqlMigrationStep::AlterEnum(_) => "AlterEnum",
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct CreateTable {
     pub table: Table,
