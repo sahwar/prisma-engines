@@ -75,6 +75,18 @@ impl MigrationFolder {
             .expect("Migration folder name is not valid UTF-8.")
     }
 
+    pub(crate) fn checksum(&self, buf: &mut Vec<u8>) -> io::Result<()> {
+        let script = self.read_migration_script()?;
+        let mut hasher = Sha512::new();
+        hasher.update(&script);
+        let bytes = hasher.finalize();
+
+        buf.clear();
+        buf.extend_from_slice(bytes.as_ref());
+
+        Ok(())
+    }
+
     #[tracing::instrument]
     pub(crate) fn matches_applied_migration(&self, applied_migration: &ImperativeMigration) -> io::Result<bool> {
         let filesystem_script = self.read_migration_script()?;

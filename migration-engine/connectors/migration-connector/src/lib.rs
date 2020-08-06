@@ -95,6 +95,12 @@ pub struct ImperativeMigration {
     pub finished_at: Option<chrono::DateTime<Utc>>,
 }
 
+impl ImperativeMigration {
+    pub fn is_applied(&self) -> bool {
+        self.finished_at.is_some()
+    }
+}
+
 pub trait DatabaseMigrationMarker: Debug + Send + Sync {
     fn serialize(&self) -> serde_json::Value;
 }
