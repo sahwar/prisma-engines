@@ -53,6 +53,9 @@ impl SqlMigrationStep {
             SqlMigrationStep::DropForeignKey(_) => "DropForeignKey",
             SqlMigrationStep::DropTable(_) => "DropTable",
             SqlMigrationStep::RenameTable { .. } => "RenameTable",
+            SqlMigrationStep::RedefineTables { .. } => {
+                "Redefine the tables that cannot be directly altered and copy over the data."
+            }
             SqlMigrationStep::CreateIndex(_) => "CreateIndex",
             SqlMigrationStep::DropIndex(_) => "DropIndex",
             SqlMigrationStep::AlterIndex(_) => "AlterIndex",
