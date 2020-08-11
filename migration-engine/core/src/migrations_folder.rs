@@ -63,11 +63,11 @@ pub(crate) fn list_migrations(migrations_folder_path: &Path) -> io::Result<Vec<M
 /// Proxy to a folder containing one migration, as returned by
 /// `create_migration_folder` and `list_migrations`.
 #[derive(Debug)]
-pub(crate) struct MigrationFolder(PathBuf);
+pub struct MigrationFolder(PathBuf);
 
 impl MigrationFolder {
     /// The `{timestamp}_{name}` formatted migration id.
-    pub(crate) fn migration_id(&self) -> &str {
+    pub fn migration_id(&self) -> &str {
         self.0
             .file_name()
             .expect("MigrationFolder::migration_id")
@@ -75,7 +75,7 @@ impl MigrationFolder {
             .expect("Migration folder name is not valid UTF-8.")
     }
 
-    pub(crate) fn checksum(&self, buf: &mut Vec<u8>) -> io::Result<()> {
+    pub fn checksum(&self, buf: &mut Vec<u8>) -> io::Result<()> {
         let script = self.read_migration_script()?;
         let mut hasher = Sha512::new();
         hasher.update(&script);
@@ -88,7 +88,7 @@ impl MigrationFolder {
     }
 
     #[tracing::instrument]
-    pub(crate) fn matches_applied_migration(&self, applied_migration: &ImperativeMigration) -> io::Result<bool> {
+    pub fn matches_applied_migration(&self, applied_migration: &ImperativeMigration) -> io::Result<bool> {
         let filesystem_script = self.read_migration_script()?;
         let mut hasher = Sha512::new();
         hasher.update(&filesystem_script);
@@ -98,7 +98,7 @@ impl MigrationFolder {
     }
 
     #[tracing::instrument]
-    pub(crate) fn write_migration_script(&self, script: &str, extension: &str) -> std::io::Result<()> {
+    pub fn write_migration_script(&self, script: &str, extension: &str) -> std::io::Result<()> {
         let mut path = self.0.join(MIGRATION_SCRIPT_FILENAME);
 
         path.set_extension(extension);
@@ -110,7 +110,7 @@ impl MigrationFolder {
     }
 
     #[tracing::instrument]
-    pub(crate) fn read_migration_script(&self) -> std::io::Result<String> {
+    pub fn read_migration_script(&self) -> std::io::Result<String> {
         std::fs::read_to_string(&self.0.join("migration.sql"))
     }
 }

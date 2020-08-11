@@ -10,6 +10,7 @@ mod migrations_folder;
 pub use api::GenericApi;
 pub use commands::{ApplyMigrationInput, InferMigrationStepsInput, MigrationStepsResultOutput};
 pub use error::CoreResult;
+pub use migrations_folder::MigrationFolder;
 
 use commands::{CommandError, CommandResult};
 use datamodel::{

@@ -14,6 +14,7 @@ mod sql_migration_persistence;
 mod sql_renderer;
 mod sql_schema_calculator;
 mod sql_schema_differ;
+mod temporary_database;
 
 pub use error::*;
 pub use sql_migration::*;
@@ -193,6 +194,48 @@ impl MigrationConnector for SqlMigrationConnector {
         };
 
         catch(self.connection_info(), fut).await
+    }
+
+    async fn revert_to(
+        &self,
+        filesystem_migrations: &[String],
+        to_be_rolled_back: &[ImperativeMigration],
+    ) -> ConnectorResult<SqlMigration> {
+        let temporary_db = self.flavour.create_temporary_database().await?;
+
+        // apply all the migrations
+        for migration in filesystem_migrations {
+            temporary_db
+                .conn
+                .raw_cmd(migration)
+                .await
+                .map_err(SqlError::from)
+                .map_err(|err| err.into_connector_error(self.database_info().connection_info()))?;
+        }
+
+        // introspect current schema
+        let src_schema = self
+            .describe_schema()
+            .await
+            .map_err(SqlError::from)
+            .map_err(|err| err.into_connector_error(self.database_info().connection_info()))?;
+
+        // introspect temporary database
+        let target_schema = temporary_db
+            .describe(self.flavour.as_ref())
+            .await
+            .map_err(SqlError::from)
+            .map_err(|err| err.into_connector_error(self.database_info().connection_info()))?;
+
+        // infer database migration
+        let migration = infer(src_schema, target_schema, self.database_info(), self.flavour.as_ref());
+
+        // apply
+        // marked migrations as rolled back
+
+        self.flavour.drop_temporary_database(&temporary_db).await?;
+
+        todo!()
     }
 }
 

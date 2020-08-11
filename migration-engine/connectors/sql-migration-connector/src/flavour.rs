@@ -4,8 +4,8 @@
 
 use crate::{
     catch, connect, database_info::DatabaseInfo, sql_destructive_change_checker::DestructiveChangeCheckerFlavour,
-    sql_renderer::SqlRenderer, sql_schema_differ::SqlSchemaDifferFlavour, CheckDatabaseInfoResult, SqlError, SqlResult,
-    SystemDatabase,
+    sql_renderer::SqlRenderer, sql_schema_differ::SqlSchemaDifferFlavour, temporary_database::TemporaryDatabase,
+    CheckDatabaseInfoResult, SqlError, SqlResult, SystemDatabase,
 };
 use futures::future::TryFutureExt;
 use migration_connector::{ConnectorError, ConnectorResult};
@@ -67,6 +67,12 @@ pub(crate) trait SqlFlavour:
     async fn initialize(&self, conn: &dyn Queryable, database_info: &DatabaseInfo) -> SqlResult<()>;
 
     async fn ensure_imperative_migrations_table(&self, conn: &dyn Queryable) -> SqlResult<()>;
+
+    /// Create a temporary database and connect to it.
+    async fn create_temporary_database(&self) -> ConnectorResult<TemporaryDatabase>;
+
+    /// Drop a temporary database.
+    async fn drop_temporary_database(&self, temporary_database: &TemporaryDatabase) -> ConnectorResult<()>;
 }
 
 #[derive(Debug)]
@@ -152,6 +158,14 @@ impl SqlFlavour for MysqlFlavour {
 
         Ok(())
     }
+
+    async fn create_temporary_database(&self) -> ConnectorResult<TemporaryDatabase> {
+        todo!("create_temporary_database");
+    }
+
+    async fn drop_temporary_database(&self, _temporary_database: &TemporaryDatabase) -> ConnectorResult<()> {
+        todo!("drop_temporary_database")
+    }
 }
 
 #[derive(Debug)]
@@ -232,6 +246,26 @@ impl SqlFlavour for SqliteFlavour {
 
         Ok(())
     }
+
+    async fn create_temporary_database(&self) -> ConnectorResult<TemporaryDatabase> {
+        let tempdir = tempfile::tempdir().expect("temporary directory creation");
+        let file_path = tempdir.path().join("migrationdb.sqlite");
+        tracing::info!(file_path = ?file_path, "Creating temporary sqlite database.");
+        let file_path = file_path.to_str().unwrap();
+        let url = format!("file:{}", file_path);
+        let (conn, database_info) = crate::connect(&url).await?;
+
+        Ok(TemporaryDatabase {
+            name: file_path.to_owned(),
+            conn,
+            temp_dir: Some(tempdir),
+            schema_name: database_info.connection_info().schema_name().to_owned(),
+        })
+    }
+
+    async fn drop_temporary_database(&self, _temporary_database: &TemporaryDatabase) -> ConnectorResult<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -291,6 +325,13 @@ impl SqlFlavour for PostgresFlavour {
         .await?;
 
         Ok(())
+    }
+
+    async fn create_temporary_database(&self) -> ConnectorResult<TemporaryDatabase> {
+        todo!("create_temporary_database");
+    }
+    async fn drop_temporary_database(&self, _temporary_database: &TemporaryDatabase) -> ConnectorResult<()> {
+        todo!("drop_temporary_database")
     }
 }
 

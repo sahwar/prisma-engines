@@ -84,6 +84,11 @@ pub trait MigrationConnector: Send + Sync + 'static {
 
     async fn persist_imperative_migration(&self, name: &str, checksum: &[u8], script: &str) -> ConnectorResult<()>;
     async fn read_imperative_migrations(&self) -> ConnectorResult<Vec<ImperativeMigration>>;
+    async fn revert_to(
+        &self,
+        filesystem_migrations: &[String],
+        to_be_rolled_back: &[ImperativeMigration],
+    ) -> ConnectorResult<Self::DatabaseMigration>;
 }
 
 #[derive(Debug)]

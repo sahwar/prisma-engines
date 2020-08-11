@@ -36,7 +36,7 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
 
         // Create/overwrite the migration file, if the project is using migrations.
         if let Some(path) = input.migrations_folder_path.as_ref().map(std::path::Path::new) {
-            catch_up(path, connector).await?;
+            catch_up(path, input.force, connector).await?;
 
             let database_migration = inferrer.infer(&schema, &schema, &[]).await?;
             let checks = checker.check(&database_migration).await?;
@@ -150,7 +150,7 @@ async fn apply_to_dev_database<D: DatabaseMigrationMarker>(
 ///
 ///   1. Revert database schema to the migration where they diverge
 ///   2. Apply migrations folder history from there
-async fn catch_up<C, D>(migrations_folder_path: &Path, connector: &C) -> CommandResult<()>
+async fn catch_up<C, D>(migrations_folder_path: &Path, force: bool, connector: &C) -> CommandResult<()>
 where
     C: MigrationConnector<DatabaseMigration = D>,
     D: DatabaseMigrationMarker + 'static,
@@ -175,9 +175,20 @@ where
                 applier.apply_migration_script(&script).await?;
             }
         }
-        HistoryDiagnostic::FilesystemIsBehind {
-            unpersisted_migrations: _,
-        } => todo!("filesystem is behind"),
+        HistoryDiagnostic::FilesystemIsBehind { unpersisted_migrations } => {
+            tracing::info!(
+                ?unpersisted_migrations,
+                "The filesystem migrations are behind the migrations applied to the database."
+            );
+
+            if force {
+                tracing::warn!("Rolling back applied migrations that do not appear in the filesystem.");
+                let fs_migration_scripts: Vec<String> = filesystem_migrations.iter().map(|_| todo!()).collect();
+                connector
+                    .revert_to(&fs_migration_scripts, unpersisted_migrations)
+                    .await?;
+            }
+        }
         HistoryDiagnostic::HistoriesDiverge {
             last_applied_filesystem_migration: _,
         } => todo!("diverging histories"),
