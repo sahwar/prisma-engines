@@ -159,10 +159,12 @@ impl MigrationConnector for SqlMigrationConnector {
     }
 
     async fn read_imperative_migrations(&self) -> ConnectorResult<Vec<ImperativeMigration>> {
+        use quaint::ast;
+
         let fut = async {
             self.ensure_imperative_migrations_table().await?;
 
-            let query = quaint::ast::Select::from_table((self.schema_name(), "prisma_imperative_migrations"))
+            let query = ast::Select::from_table((self.schema_name(), "prisma_imperative_migrations"))
                 .column("script")
                 .column("name")
                 .column("checksum")
@@ -237,6 +239,16 @@ impl MigrationConnector for SqlMigrationConnector {
         // infer database migration
         let migration = infer(src_schema, target_schema, self.database_info(), self.flavour.as_ref());
 
+        let diagnostics = self.destructive_change_checker().check(&migration).await?;
+
+        for warning in &diagnostics.warnings {
+            tracing::warn!("WARNING: {}", warning.description);
+        }
+
+        if !diagnostics.unexecutable_migrations.is_empty() {
+            todo!("Unexecutable!\n{:#?}", diagnostics.unexecutable_migrations);
+        }
+
         // apply
         let applier = self.database_migration_step_applier();
 
@@ -259,7 +271,7 @@ impl MigrationConnector for SqlMigrationConnector {
         // marked migrations as rolled back
         let rollback = ast::Update::table("prisma_imperative_migrations")
             .so_that(ast::Column::from("checksum").in_selection(rolled_back_checksums))
-            .set("rolled_back_at", "CURRENT_TIMESTAMP");
+            .set("rolledBackAt", "CURRENT_TIMESTAMP");
 
         self.conn()
             .execute(rollback.into())
@@ -268,7 +280,7 @@ impl MigrationConnector for SqlMigrationConnector {
 
         self.flavour.drop_temporary_database(&temporary_db).await?;
 
-        todo!()
+        Ok(migration)
     }
 }
 

@@ -103,7 +103,7 @@ pub struct ImperativeMigration {
 
 impl ImperativeMigration {
     pub fn is_applied(&self) -> bool {
-        self.finished_at.is_some()
+        self.finished_at.is_some() && self.rolled_back_at.is_none()
     }
 }
 

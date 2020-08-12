@@ -17,7 +17,7 @@ pub trait DatabaseMigrationStepApplier<T>: Send + Sync {
     fn render_migration_script(&self, database_migration: &T) -> (&'static str, String);
 
     /// Apply a migration script passed with `render_migration_script`.
-    async fn apply_migration_script(&self, script: &str) -> ConnectorResult<()>;
+    async fn apply_migration_script(&self, script: &str, checksum: &[u8]) -> ConnectorResult<()>;
 
     /// Returns whether a database migration is empty.
     fn migration_is_empty(&self, migration: &T) -> bool;

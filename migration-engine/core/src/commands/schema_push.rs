@@ -59,20 +59,21 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
                 .map_err(|err| CommandError::Generic(err.into()))?;
 
             tracing::debug!("Applying new migration `{}`", folder.migration_id());
-            applier.apply_migration_script(&script).await?;
+            let mut hasher = Sha512::new();
+            hasher.update(&script);
+
+            let checksum = hasher.finalize();
+            connector
+                .persist_imperative_migration(folder.migration_id(), checksum.as_ref(), &script)
+                .await?;
+
+            applier.apply_migration_script(&script, &checksum).await?;
 
             if !path.exists() {
                 return Err(CommandError::Input(anyhow::anyhow!(
                     "The provided migrations folder path does not exist."
                 )));
             }
-
-            let mut hasher = Sha512::new();
-            hasher.update(&script);
-            let checksum = hasher.finalize();
-            connector
-                .persist_imperative_migration("draft", checksum.as_ref(), &script)
-                .await?;
 
             Ok(SchemaPushOutput {
                 executed_steps: 1,
@@ -172,7 +173,15 @@ where
                     .read_migration_script()
                     .map_err(|err| CommandError::Generic(err.into()))?;
 
-                applier.apply_migration_script(&script).await?;
+                let mut hasher = Sha512::new();
+                hasher.update(&script);
+                let checksum = hasher.finalize();
+
+                connector
+                    .persist_imperative_migration(filesystem_migration.migration_id(), &checksum, &script)
+                    .await?;
+
+                applier.apply_migration_script(&script, &checksum).await?;
             }
         }
         HistoryDiagnostic::FilesystemIsBehind { unpersisted_migrations } => {
@@ -190,8 +199,52 @@ where
             }
         }
         HistoryDiagnostic::HistoriesDiverge {
-            last_applied_filesystem_migration: _,
-        } => todo!("diverging histories"),
+            last_applied_filesystem_migration,
+        } => {
+            let last_applied_fs_migration = filesystem_migrations
+                .get(last_applied_filesystem_migration)
+                .expect("Last applied fs migration");
+
+            tracing::warn!(
+                "Diverging histories detected: reverting to `{}` and applying local migrations.",
+                last_applied_fs_migration.migration_id()
+            );
+
+            let common_fs_migrations: Vec<String> = filesystem_migrations[..last_applied_filesystem_migration]
+                .iter()
+                .map(|mig| mig.read_migration_script().expect("read mig script"))
+                .collect();
+
+            // Revert
+            connector
+                .revert_to(
+                    &common_fs_migrations,
+                    &applied_migrations[last_applied_filesystem_migration..],
+                )
+                .await?;
+
+            tracing::info!("Reverted!");
+
+            // Reapply
+            let unapplied_migrations = &filesystem_migrations[last_applied_filesystem_migration..];
+
+            for filesystem_migration in unapplied_migrations {
+                tracing::debug!("Applying saved migration `{}`", filesystem_migration.migration_id());
+                let script = filesystem_migration
+                    .read_migration_script()
+                    .map_err(|err| CommandError::Generic(err.into()))?;
+
+                let mut hasher = Sha512::new();
+                hasher.update(&script);
+                let checksum = hasher.finalize();
+
+                connector
+                    .persist_imperative_migration(filesystem_migration.migration_id(), &checksum, &script)
+                    .await?;
+
+                applier.apply_migration_script(&script, &checksum).await?;
+            }
+        }
     }
 
     Ok(())
@@ -207,7 +260,7 @@ enum HistoryDiagnostic<'a> {
         unpersisted_migrations: &'a [ImperativeMigration],
     },
     HistoriesDiverge {
-        last_applied_filesystem_migration: Option<usize>,
+        last_applied_filesystem_migration: usize,
     },
 }
 
@@ -217,7 +270,7 @@ fn diagnose_migrations_history<'a>(
 ) -> io::Result<HistoryDiagnostic<'a>> {
     let mut filesystem_migrations = filesystem_migrations_slice.iter().enumerate();
     let mut applied_migrations = applied_migrations_slice.iter().enumerate();
-    let mut last_applied_filesystem_migration: Option<usize> = None;
+    let mut last_applied_filesystem_migration: usize = 0;
     let mut checksum_buf = Vec::with_capacity(6);
 
     while let Some((fs_idx, fs_migration)) = filesystem_migrations.next() {
@@ -225,7 +278,7 @@ fn diagnose_migrations_history<'a>(
 
         match next_applied_migration(&mut applied_migrations) {
             Some(applied_migration) if applied_migration.checksum == checksum_buf => {
-                last_applied_filesystem_migration = Some(fs_idx);
+                last_applied_filesystem_migration = fs_idx;
             }
             Some(_applied_migration) => {
                 return Ok(HistoryDiagnostic::HistoriesDiverge {

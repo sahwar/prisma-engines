@@ -1,4 +1,5 @@
 use crate::*;
+use chrono::Utc;
 use futures::TryFutureExt;
 use sql_renderer::{rendered_step::RenderedStep, IteratorJoin, Quoted, RenderedAlterColumn};
 use sql_schema_describer::walkers::{find_column, walk_columns, ColumnWalker, SqlSchemaExt};
@@ -76,11 +77,29 @@ impl DatabaseMigrationStepApplier<SqlMigration> for SqlDatabaseStepApplier<'_> {
         ("sql", migration_script)
     }
 
-    async fn apply_migration_script(&self, script: &str) -> ConnectorResult<()> {
-        crate::catch(
-            self.connection_info(),
-            self.conn().raw_cmd(script).map_err(SqlError::from),
-        )
+    async fn apply_migration_script(&self, script: &str, checksum: &[u8]) -> ConnectorResult<()> {
+        use quaint::ast::*;
+
+        crate::catch(self.connection_info(), async {
+            let conn = self.conn();
+
+            // Register that the migration started.
+            let start_query = Update::table("prisma_imperative_migrations")
+                .so_that(Column::from("checksum").equals(checksum))
+                .set("startedAt", Utc::now());
+            conn.execute(start_query.into()).map_err(SqlError::from).await?;
+
+            // Execute the migration.
+            conn.raw_cmd(script).map_err(SqlError::from).await?;
+
+            // Register that the migration finished.
+            let end_query = Update::table("prisma_imperative_migrations")
+                .so_that(Column::from("checksum").equals(checksum))
+                .set("finishedAt", Utc::now());
+            conn.execute(end_query.into()).map_err(SqlError::from).await?;
+
+            Ok(())
+        })
         .await
     }
 
