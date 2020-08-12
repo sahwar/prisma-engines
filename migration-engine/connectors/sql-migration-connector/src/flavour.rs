@@ -152,7 +152,7 @@ impl SqlFlavour for MysqlFlavour {
 
     async fn ensure_imperative_migrations_table(&self, conn: &dyn Queryable) -> SqlResult<()> {
         conn.raw_cmd(
-            "CREATE TABLE IF NOT EXISTS `prisma_imperative_migrations` (id INTEGER AUTOINCREMENT PRIMARY KEY, name TEXT NOT NULL, script TEXT NOT NULL, checksum VARBINARY(8) NOT NULL, startedAt DATETIME, finishedAt DATETIME)",
+            "CREATE TABLE IF NOT EXISTS `prisma_imperative_migrations` (id INTEGER AUTOINCREMENT PRIMARY KEY, name TEXT NOT NULL, script TEXT NOT NULL, checksum VARBINARY(8) NOT NULL, startedAt DATETIME, finishedAt DATETIME, rolledBackAt DATETIME)",
         )
         .await?;
 
@@ -240,7 +240,7 @@ impl SqlFlavour for SqliteFlavour {
 
     async fn ensure_imperative_migrations_table(&self, conn: &dyn Queryable) -> SqlResult<()> {
         conn.raw_cmd(
-            "CREATE TABLE IF NOT EXISTS \"quaint\".\"prisma_imperative_migrations\" (id INTEGER PRIMARY KEY, name VARCHAR NOT NULL, script VARCHAR NOT NULL, checksum VARCHAR NOT NULL, startedAt DATETIME, finishedAt DATETIME)",
+            "CREATE TABLE IF NOT EXISTS \"quaint\".\"prisma_imperative_migrations\" (id INTEGER PRIMARY KEY, name VARCHAR NOT NULL, script VARCHAR NOT NULL, checksum VARCHAR NOT NULL, startedAt DATETIME, finishedAt DATETIME, rolledBackAt DATETIME)",
         )
         .await?;
 
@@ -320,7 +320,7 @@ impl SqlFlavour for PostgresFlavour {
 
     async fn ensure_imperative_migrations_table(&self, conn: &dyn Queryable) -> SqlResult<()> {
         conn.raw_cmd(
-            &format!("CREATE TABLE IF NOT EXISTS \"{schema_name}\".\"{table_name}\" (id SERIAL PRIMARY KEY, name TEXT NOT NULL, script TEXT NOT NULL, checksum BYTEA NOT NULL, startedAt DATETIME, finishedAt DATETIME)", schema_name = self.0.schema(), table_name = "prisma_imperative_migrations"),
+            &format!("CREATE TABLE IF NOT EXISTS \"{schema_name}\".\"{table_name}\" (id SERIAL PRIMARY KEY, name TEXT NOT NULL, script TEXT NOT NULL, checksum BYTEA NOT NULL, startedAt DATETIME, finishedAt DATETIME, rolledBackAt DATETIME)", schema_name = self.0.schema(), table_name = "prisma_imperative_migrations"),
         )
         .await?;
 

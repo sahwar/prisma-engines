@@ -98,6 +98,7 @@ pub struct ImperativeMigration {
     pub checksum: Vec<u8>,
     pub started_at: Option<chrono::DateTime<Utc>>,
     pub finished_at: Option<chrono::DateTime<Utc>>,
+    pub rolled_back_at: Option<chrono::DateTime<Utc>>,
 }
 
 impl ImperativeMigration {

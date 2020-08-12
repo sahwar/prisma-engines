@@ -167,7 +167,8 @@ impl MigrationConnector for SqlMigrationConnector {
                 .column("name")
                 .column("checksum")
                 .column("startedAt")
-                .column("finishedAt");
+                .column("finishedAt")
+                .column("rolledBackAt");
 
             let rows = self.conn().query(query.into()).await?;
 
@@ -186,6 +187,10 @@ impl MigrationConnector for SqlMigrationConnector {
                             .get("finishedAt")
                             .and_then(|value| value.as_datetime())
                             .map(|v| v.into()),
+                        rolled_back_at: row
+                            .get("rolledBackAt")
+                            .and_then(|value| value.as_datetime())
+                            .map(|v| v.into()),
                     })
                 })
                 .collect();
@@ -201,6 +206,8 @@ impl MigrationConnector for SqlMigrationConnector {
         filesystem_migrations: &[String],
         to_be_rolled_back: &[ImperativeMigration],
     ) -> ConnectorResult<SqlMigration> {
+        use quaint::ast::{self, *};
+
         let temporary_db = self.flavour.create_temporary_database().await?;
 
         // apply all the migrations
@@ -231,7 +238,33 @@ impl MigrationConnector for SqlMigrationConnector {
         let migration = infer(src_schema, target_schema, self.database_info(), self.flavour.as_ref());
 
         // apply
+        let applier = self.database_migration_step_applier();
+
+        if applier.migration_is_empty(&migration) {
+            tracing::info!("Nothing to roll back.");
+            return Ok(migration);
+        }
+
+        let mut step = 0;
+
+        while applier.apply_step(&migration, step).await? {
+            step += 1;
+        }
+
+        let rolled_back_checksums: Vec<quaint::Value<'_>> = to_be_rolled_back
+            .iter()
+            .map(|migration| quaint::Value::bytes(migration.checksum.as_slice()))
+            .collect();
+
         // marked migrations as rolled back
+        let rollback = ast::Update::table("prisma_imperative_migrations")
+            .so_that(ast::Column::from("checksum").in_selection(rolled_back_checksums))
+            .set("rolled_back_at", "CURRENT_TIMESTAMP");
+
+        self.conn()
+            .execute(rollback.into())
+            .await
+            .expect("failed to roll back in imperative migrations table");
 
         self.flavour.drop_temporary_database(&temporary_db).await?;
 
