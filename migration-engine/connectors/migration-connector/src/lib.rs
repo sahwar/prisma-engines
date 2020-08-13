@@ -88,7 +88,13 @@ pub trait MigrationConnector: Send + Sync + 'static {
         &self,
         filesystem_migrations: &[String],
         to_be_rolled_back: &[ImperativeMigration],
-    ) -> ConnectorResult<Self::DatabaseMigration>;
+    ) -> ConnectorResult<()>;
+
+    async fn smart_revert_to(
+        &self,
+        filesystem_migrations: &[String],
+        to_be_rolled_back: &[ImperativeMigration],
+    ) -> ConnectorResult<()>;
 }
 
 #[derive(Debug)]
@@ -114,3 +120,19 @@ pub trait DatabaseMigrationMarker: Debug + Send + Sync {
 /// Shorthand for a [Result](https://doc.rust-lang.org/std/result/enum.Result.html) where the error
 /// variant is a [ConnectorError](/error/enum.ConnectorError.html).
 pub type ConnectorResult<T> = Result<T, ConnectorError>;
+
+mod checksuming {
+    use sha2::{digest::generic_array::*, *};
+
+    pub fn migration_script_checksum(script: &str) -> GenericArray<u8, <Sha512 as Digest>::OutputSize> {
+        let mut hasher = Sha512::new();
+
+        hasher.update(&script);
+
+        let checksum = hasher.finalize();
+
+        checksum
+    }
+}
+
+pub use checksuming::migration_script_checksum;

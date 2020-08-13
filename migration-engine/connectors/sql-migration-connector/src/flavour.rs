@@ -256,9 +256,9 @@ impl SqlFlavour for SqliteFlavour {
         let (conn, database_info) = crate::connect(&url).await?;
 
         Ok(TemporaryDatabase {
-            name: file_path.to_owned(),
+            _name: file_path.to_owned(),
+            _temp_dir: Some(tempdir),
             conn,
-            temp_dir: Some(tempdir),
             schema_name: database_info.connection_info().schema_name().to_owned(),
         })
     }

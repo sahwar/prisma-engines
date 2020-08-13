@@ -206,8 +206,33 @@ impl MigrationConnector for SqlMigrationConnector {
     async fn revert_to(
         &self,
         filesystem_migrations: &[String],
+        _to_be_rolled_back: &[ImperativeMigration],
+    ) -> ConnectorResult<()> {
+        tracing::warn!("Dropping the database to revert migrations.");
+
+        self.drop_database().await?;
+        catch(
+            self.database_info().connection_info(),
+            self.flavour.initialize(self.conn(), self.database_info()),
+        )
+        .await?;
+
+        let applier = SqlDatabaseStepApplier { connector: self };
+
+        // apply all the migrations
+        for script in filesystem_migrations {
+            let checksum = migration_script_checksum(&script);
+            applier.apply_migration_script(script, &checksum).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn smart_revert_to(
+        &self,
+        filesystem_migrations: &[String],
         to_be_rolled_back: &[ImperativeMigration],
-    ) -> ConnectorResult<SqlMigration> {
+    ) -> ConnectorResult<()> {
         use quaint::ast::{self, *};
 
         let temporary_db = self.flavour.create_temporary_database().await?;
@@ -253,8 +278,8 @@ impl MigrationConnector for SqlMigrationConnector {
         let applier = self.database_migration_step_applier();
 
         if applier.migration_is_empty(&migration) {
-            tracing::info!("Nothing to roll back.");
-            return Ok(migration);
+            tracing::warn!("Nothing to roll back.");
+            return Ok(());
         }
 
         let mut step = 0;
@@ -280,7 +305,7 @@ impl MigrationConnector for SqlMigrationConnector {
 
         self.flavour.drop_temporary_database(&temporary_db).await?;
 
-        Ok(migration)
+        Ok(())
     }
 }
 
