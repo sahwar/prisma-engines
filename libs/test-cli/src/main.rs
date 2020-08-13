@@ -258,6 +258,10 @@ async fn schema_push(cmd: &SchemaPush) -> anyhow::Result<()> {
         }
     }
 
+    if let Some(radical_measure) = &response.radical_measure {
+        eprintln!("⚠️ {} ⚠️", radical_measure.bright_yellow());
+    }
+
     if response.executed_steps > 0 {
         eprintln!(
             "{}  {}",

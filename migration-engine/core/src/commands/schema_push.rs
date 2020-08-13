@@ -36,7 +36,14 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
 
         // Create/overwrite the migration file, if the project is using migrations.
         if let Some(path) = input.migrations_folder_path.as_ref().map(std::path::Path::new) {
-            catch_up(path, input.force, connector).await?;
+            if let Some(radical_measure) = catch_up(path, input.force, connector).await? {
+                return Ok(SchemaPushOutput {
+                    executed_steps: 0,
+                    warnings: Vec::new(),
+                    unexecutable: Vec::new(),
+                    radical_measure: Some(radical_measure),
+                });
+            }
 
             let database_migration = inferrer.infer(&schema, &schema, &[]).await?;
             let checks = checker.check(&database_migration).await?;
@@ -47,6 +54,7 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
                     executed_steps: 0,
                     warnings: Vec::new(),
                     unexecutable: Vec::new(),
+                    radical_measure: None,
                 });
             }
 
@@ -83,6 +91,7 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
                     .into_iter()
                     .map(|unexecutable| unexecutable.description)
                     .collect(),
+                radical_measure: None,
             })
         } else {
             // Otherwise only apply the migration.
@@ -104,6 +113,7 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
                     .into_iter()
                     .map(|unexecutable| unexecutable.description)
                     .collect(),
+                radical_measure: None,
             })
         }
     }
@@ -151,7 +161,7 @@ async fn apply_to_dev_database<D: DatabaseMigrationMarker>(
 ///
 ///   1. Revert database schema to the migration where they diverge
 ///   2. Apply migrations folder history from there
-async fn catch_up<C, D>(migrations_folder_path: &Path, force: bool, connector: &C) -> CommandResult<()>
+async fn catch_up<C, D>(migrations_folder_path: &Path, force: bool, connector: &C) -> CommandResult<Option<String>>
 where
     C: MigrationConnector<DatabaseMigration = D>,
     D: DatabaseMigrationMarker + 'static,
@@ -196,6 +206,8 @@ where
                 connector
                     .revert_to(&fs_migration_scripts, unpersisted_migrations)
                     .await?;
+            } else {
+                return Ok(Some(format!("The migrations folder is behind the database — run migrate again with the --force flag to revert the migrations. This will drop all the data in the local database.")));
             }
         }
         HistoryDiagnostic::HistoriesDiverge {
@@ -204,6 +216,10 @@ where
             let last_applied_fs_migration = filesystem_migrations
                 .get(last_applied_filesystem_migration)
                 .expect("Last applied fs migration");
+
+            if !force {
+                return Ok(Some(format!("The history of the migrations from the migrations table and the migrations folder diverge, after the `{}` migration. Please run migrate again with the --force flag to return to a clean history. This will drop all the data in the local database.", filesystem_migrations.get(last_applied_filesystem_migration).expect("get last_applied_filesystem_migration by index").migration_id())));
+            }
 
             tracing::warn!(
                 "Diverging histories detected: reverting to `{}` and applying local migrations.",
@@ -229,7 +245,10 @@ where
             let unapplied_migrations = &filesystem_migrations[last_applied_filesystem_migration..];
 
             for filesystem_migration in unapplied_migrations {
-                tracing::debug!("Applying saved migration `{}`", filesystem_migration.migration_id());
+                tracing::debug!(
+                    "Applying migration from migrations folder: `{}`",
+                    filesystem_migration.migration_id()
+                );
                 let script = filesystem_migration
                     .read_migration_script()
                     .map_err(|err| CommandError::Generic(err.into()))?;
@@ -247,7 +266,7 @@ where
         }
     }
 
-    Ok(())
+    Ok(None)
 }
 
 #[derive(Debug)]
@@ -335,6 +354,7 @@ pub struct SchemaPushOutput {
     pub executed_steps: u32,
     pub warnings: Vec<String>,
     pub unexecutable: Vec<String>,
+    pub radical_measure: Option<String>,
 }
 
 impl SchemaPushOutput {
