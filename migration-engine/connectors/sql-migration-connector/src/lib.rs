@@ -97,10 +97,17 @@ impl MigrationConnector for SqlMigrationConnector {
     }
 
     async fn initialize(&self) -> ConnectorResult<()> {
-        catch(
-            self.database_info.connection_info(),
-            self.flavour.initialize(self.database.as_ref(), &self.database_info),
-        )
+        catch(self.database_info.connection_info(), async {
+            self.flavour
+                .initialize(self.database.as_ref(), &self.database_info)
+                .await?;
+
+            self.flavour
+                .ensure_imperative_migrations_table(self.database.as_ref())
+                .await?;
+
+            Ok(())
+        })
         .await?;
 
         self.migration_persistence().init().await?;
