@@ -18,7 +18,7 @@ where
 
     /// Check the database migration for destructive or unexecutable steps
     /// without performing any IO.
-    fn pure_check(&self, database_migration: &T) -> ConnectorResult<DestructiveChangeDiagnostics>;
+    fn pure_check(&self, database_migration: &T) -> DestructiveChangeDiagnostics;
 }
 
 /// The errors and warnings emitted by the [DestructiveChangeChecker](trait.DestructiveChangeChecker.html).
@@ -42,6 +42,21 @@ impl DestructiveChangeDiagnostics {
 
     pub fn has_warnings(&self) -> bool {
         !self.warnings.is_empty()
+    }
+
+    /// Estimate the size of a rendered string with all the diagnostics, only
+    /// taking the messages into account.
+    pub fn rendered_size_hint(&self) -> usize {
+        self.errors
+            .iter()
+            .map(|err| err.description.len() + 3)
+            .chain(self.warnings.iter().map(|warning| warning.description.len() + 3))
+            .chain(
+                self.unexecutable_migrations
+                    .iter()
+                    .map(|unex| unex.description.len() + 3),
+            )
+            .sum()
     }
 }
 
@@ -81,7 +96,7 @@ where
         Ok(DestructiveChangeDiagnostics::new())
     }
 
-    fn pure_check(&self, _database_migration: &T) -> ConnectorResult<DestructiveChangeDiagnostics> {
-        Ok(DestructiveChangeDiagnostics::new())
+    fn pure_check(&self, _database_migration: &T) -> DestructiveChangeDiagnostics {
+        DestructiveChangeDiagnostics::new()
     }
 }

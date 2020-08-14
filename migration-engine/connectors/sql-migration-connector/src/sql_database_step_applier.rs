@@ -48,9 +48,35 @@ impl DatabaseMigrationStepApplier<SqlMigration> for SqlDatabaseStepApplier<'_> {
         )
     }
 
-    fn render_migration_script(&self, database_migration: &SqlMigration) -> (&'static str, String) {
+    fn render_migration_script(
+        &self,
+        database_migration: &SqlMigration,
+        destructive_change_diagnostics: &DestructiveChangeDiagnostics,
+    ) -> (&'static str, String) {
         // Assume a reasonable baseline of 20 characters per migration step.
-        let mut migration_script = String::with_capacity(database_migration.steps.len() * 20);
+        let mut migration_script = String::with_capacity(
+            database_migration.steps.len() * 20 + destructive_change_diagnostics.rendered_size_hint(),
+        );
+
+        if destructive_change_diagnostics.has_warnings()
+            || destructive_change_diagnostics.unexecutable_migrations.len() > 0
+        {
+            migration_script.push_str("/*\n  Warnings:\n\n");
+
+            for warning in &destructive_change_diagnostics.warnings {
+                migration_script.push_str("  - ");
+                migration_script.push_str(&warning.description);
+                migration_script.push_str("\n");
+            }
+
+            for unexecutable in &destructive_change_diagnostics.unexecutable_migrations {
+                migration_script.push_str("  - ");
+                migration_script.push_str(&unexecutable.description);
+                migration_script.push_str("\n");
+            }
+
+            migration_script.push_str("\n*/")
+        }
 
         for step in &database_migration.steps {
             let statements = render_raw_sql(

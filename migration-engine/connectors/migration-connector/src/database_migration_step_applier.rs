@@ -14,7 +14,11 @@ pub trait DatabaseMigrationStepApplier<T>: Send + Sync {
 
     /// Render the steps as a full script. The return type should be read as
     /// (<file extension>, script)
-    fn render_migration_script(&self, database_migration: &T) -> (&'static str, String);
+    fn render_migration_script(
+        &self,
+        database_migration: &T,
+        destructive_change_diagnostics: &DestructiveChangeDiagnostics,
+    ) -> (&'static str, String);
 
     /// Apply a migration script passed with `render_migration_script`.
     async fn apply_migration_script(&self, script: &str, checksum: &[u8]) -> ConnectorResult<()>;

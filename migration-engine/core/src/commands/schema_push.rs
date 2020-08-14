@@ -47,6 +47,7 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
 
             let database_migration = inferrer.infer(&schema, &schema, &[]).await?;
             let checks = checker.check(&database_migration).await?;
+            let pure_checks = checker.pure_check(&database_migration);
 
             if applier.migration_is_empty(&database_migration) {
                 tracing::info!("The generated database migration is empty.");
@@ -58,7 +59,7 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
                 });
             }
 
-            let (extension, script) = applier.render_migration_script(&database_migration);
+            let (extension, script) = applier.render_migration_script(&database_migration, &pure_checks);
 
             let folder = create_migration_folder(path, "draft").map_err(|err| CommandError::Generic(err.into()))?;
 
