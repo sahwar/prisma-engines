@@ -20,7 +20,7 @@ pub(crate) fn create_migration_folder(
     migrations_folder_path: &Path,
     migration_name: &str,
 ) -> io::Result<MigrationFolder> {
-    let timestamp = chrono::Utc::now().format("%Y%m%d%M%S");
+    let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S");
     let folder_name = format!(
         "{timestamp}_{migration_name}",
         timestamp = timestamp,
