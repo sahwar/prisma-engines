@@ -249,7 +249,8 @@ where
                 .expect("Last applied fs migration");
 
             if !force {
-                return Ok(Some(format!("The history of the migrations from the migrations table and the migrations folder diverge, after the `{}` migration. Please run migrate again with the --force flag to return to a clean history. This will drop all the data in the local database.", filesystem_migrations.get(last_applied_filesystem_migration).expect("get last_applied_filesystem_migration by index").migration_id())));
+                // TODO: offer to rebase.
+                return Ok(Some(format!("The history of the migrations from the migrations table and the migrations folder diverge, after the `{}` migration. Please run migrate again with the --force flag to return to a clean history. This will drop all the data in the local database. (TODO: offer to rebase)", filesystem_migrations.get(last_applied_filesystem_migration).expect("get last_applied_filesystem_migration by index").migration_id())));
             }
 
             tracing::warn!(
