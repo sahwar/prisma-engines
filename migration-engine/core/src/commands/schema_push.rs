@@ -70,6 +70,12 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
 
             let (extension, script) = applier.render_migration_script(&database_migration, &pure_checks);
 
+            if !path.exists() {
+                return Err(CommandError::Input(anyhow::anyhow!(
+                    "The provided migrations folder path does not exist."
+                )));
+            }
+
             let folder = create_migration_folder(path, "draft").map_err(|err| CommandError::Generic(err.into()))?;
 
             folder
@@ -85,13 +91,18 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
                 .persist_imperative_migration(folder.migration_id(), checksum.as_ref(), &script)
                 .await?;
 
-            applier.apply_migration_script(&script, &checksum).await?;
-
-            if !path.exists() {
-                return Err(CommandError::Input(anyhow::anyhow!(
-                    "The provided migrations folder path does not exist."
-                )));
+            // Stop here and do not apply the migration if we are in draft mode.
+            if input.draft {
+                tracing::info!("Draft migration was saved!");
+                return Ok(SchemaPushOutput {
+                    executed_steps: 0,
+                    warnings: Vec::new(),
+                    unexecutable: Vec::new(),
+                    radical_measure: None,
+                });
             }
+
+            applier.apply_migration_script(&script, &checksum).await?;
 
             Ok(SchemaPushOutput {
                 executed_steps: 1,
@@ -377,6 +388,8 @@ pub struct SchemaPushInput {
     pub force: bool,
     /// Push the schema ignoring destructive change warnings.
     pub accept_data_loss: bool,
+    /// Generate the next migration without applying it.
+    pub draft: bool,
     /// The path to the migrations folder, in case the the project is using migrations.
     #[serde(default)]
     pub migrations_folder_path: Option<String>,

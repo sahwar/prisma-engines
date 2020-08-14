@@ -50,11 +50,18 @@ struct DmmfCommand {
 
 #[derive(StructOpt)]
 struct SchemaPush {
+    /// The path to the prisma schema file.
     schema_path: String,
+    /// Generate a migration without executing it.
+    #[structopt(long)]
+    draft: bool,
+    /// Allow reverting migrations, with the associated data loss.
     #[structopt(long)]
     force: bool,
+    /// Ignore data loss warnings.
     #[structopt(long)]
     continue_with_data_loss: bool,
+    /// Path to the migrations folder.
     #[structopt(long)]
     migrations_folder_path: Option<String>,
 }
@@ -239,6 +246,7 @@ async fn schema_push(cmd: &SchemaPush) -> anyhow::Result<()> {
     let response = api
         .schema_push(&SchemaPushInput {
             schema,
+            draft: cmd.draft,
             force: cmd.force,
             accept_data_loss: cmd.continue_with_data_loss,
             migrations_folder_path: cmd.migrations_folder_path.clone(),

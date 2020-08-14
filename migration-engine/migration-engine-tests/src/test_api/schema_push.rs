@@ -28,7 +28,11 @@ impl<'a> SchemaPush<'a> {
     pub async fn send(self) -> anyhow::Result<SchemaPushAssertion<'a>> {
         let input = SchemaPushInput {
             schema: self.schema,
+            // TODO
+            draft: self.force,
+            // TODO
             force: self.force,
+            // TODO
             accept_data_loss: self.force,
             migrations_folder_path: None,
         };
