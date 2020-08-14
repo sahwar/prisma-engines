@@ -75,7 +75,7 @@ impl DatabaseMigrationStepApplier<SqlMigration> for SqlDatabaseStepApplier<'_> {
                 migration_script.push_str("\n");
             }
 
-            migration_script.push_str("\n*/")
+            migration_script.push_str("\n*/\n")
         }
 
         for step in &database_migration.steps {

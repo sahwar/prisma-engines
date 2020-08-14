@@ -29,6 +29,7 @@ impl<'a> SchemaPush<'a> {
         let input = SchemaPushInput {
             schema: self.schema,
             force: self.force,
+            accept_data_loss: self.force,
             migrations_folder_path: None,
         };
 

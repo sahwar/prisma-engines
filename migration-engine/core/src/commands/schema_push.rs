@@ -59,6 +59,15 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
                 });
             }
 
+            if !should_apply(&checks, input) {
+                return Ok(SchemaPushOutput {
+                    executed_steps: 0,
+                    warnings: Vec::new(),
+                    unexecutable: Vec::new(),
+                    radical_measure: None,
+                });
+            }
+
             let (extension, script) = applier.render_migration_script(&database_migration, &pure_checks);
 
             let folder = create_migration_folder(path, "draft").map_err(|err| CommandError::Generic(err.into()))?;
@@ -128,21 +137,33 @@ async fn apply_to_dev_database<D: DatabaseMigrationMarker>(
 ) -> CommandResult<u32> {
     let mut step = 0u32;
 
-    match (checks.unexecutable_migrations.len(), checks.warnings.len(), input.force) {
-        (unexecutable, _, _) if unexecutable > 0 => {
-            tracing::warn!(unexecutable = ?checks.unexecutable_migrations, "Aborting migration because at least one unexecutable step was detected.")
+    if should_apply(checks, input) {
+        while applier.apply_step(&database_migration, step as usize).await? {
+            step += 1
         }
-        (0, 0, _) | (0, _, true) => {
-            while applier.apply_step(&database_migration, step as usize).await? {
-                step += 1
-            }
-        }
-        _ => tracing::info!(
-            "The migration was not applied because it triggered warnings and the force flag was not passed."
-        ),
     }
 
     Ok(step)
+}
+
+fn should_apply(checks: &DestructiveChangeDiagnostics, input: &SchemaPushInput) -> bool {
+    match (
+        checks.unexecutable_migrations.len(),
+        checks.warnings.len(),
+        input.accept_data_loss,
+    ) {
+        (unexecutable, _, _) if unexecutable > 0 => {
+            tracing::warn!(unexecutable = ?checks.unexecutable_migrations, "Aborting migration because at least one unexecutable step was detected.");
+            false
+        }
+        (0, 0, _) | (0, _, true) => true,
+        _ => {
+            tracing::info!(
+            "The migration was not applied because it triggered warnings and the --accept-data-loss flag was not passed."
+        );
+            false
+        }
+    }
 }
 
 /// Catch up the dev database with the migrations history.
@@ -203,10 +224,19 @@ where
 
             if force {
                 tracing::warn!("Rolling back applied migrations that do not appear in the filesystem.");
-                let fs_migration_scripts: Vec<String> = filesystem_migrations.iter().map(|_| todo!()).collect();
+                let fs_migration_scripts: Vec<String> = filesystem_migrations
+                    .iter()
+                    .map(|folder| {
+                        folder
+                            .read_migration_script()
+                            .expect("Failed to read migration script.")
+                    })
+                    .collect();
                 connector
                     .revert_to(&fs_migration_scripts, unpersisted_migrations)
                     .await?;
+
+                connector.initialize().await?;
             } else {
                 return Ok(Some(format!("The migrations folder is behind the database — run migrate again with the --force flag to revert the migrations. This will drop all the data in the local database.")));
             }
@@ -342,8 +372,10 @@ fn next_applied_migration<'a>(
 pub struct SchemaPushInput {
     /// The prisma schema.
     pub schema: String,
-    /// Push the schema ignoring destructive change warnings.
+    /// Give permission to the migration engine to revert migrations and drop data in the process.
     pub force: bool,
+    /// Push the schema ignoring destructive change warnings.
+    pub accept_data_loss: bool,
     /// The path to the migrations folder, in case the the project is using migrations.
     #[serde(default)]
     pub migrations_folder_path: Option<String>,

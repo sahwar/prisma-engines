@@ -54,6 +54,8 @@ struct SchemaPush {
     #[structopt(long)]
     force: bool,
     #[structopt(long)]
+    continue_with_data_loss: bool,
+    #[structopt(long)]
     migrations_folder_path: Option<String>,
 }
 
@@ -238,6 +240,7 @@ async fn schema_push(cmd: &SchemaPush) -> anyhow::Result<()> {
         .schema_push(&SchemaPushInput {
             schema,
             force: cmd.force,
+            accept_data_loss: cmd.continue_with_data_loss,
             migrations_folder_path: cmd.migrations_folder_path.clone(),
         })
         .await?;
@@ -279,7 +282,7 @@ async fn schema_push(cmd: &SchemaPush) -> anyhow::Result<()> {
             eprintln!(
                 "{}  {}",
                 "❌".bold(),
-                "The schema was not pushed. Pass the --force flag to ignore warnings."
+                "The schema was not pushed. Pass the --continue-with-data-loss flag to ignore warnings."
             );
             std::process::exit(1);
         }
