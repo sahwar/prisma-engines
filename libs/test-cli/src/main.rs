@@ -1,6 +1,7 @@
 use anyhow::Context;
 use colored::Colorize;
 use migration_core::commands::SchemaPushInput;
+use promptly::*;
 use std::{fs::File, io::Read};
 use structopt::*;
 
@@ -243,15 +244,32 @@ async fn schema_push(cmd: &SchemaPush) -> anyhow::Result<()> {
     let schema = read_datamodel_from_file(&cmd.schema_path).context("Error reading the schema from file")?;
     let api = migration_core::migration_api(&schema).await?;
 
-    let response = api
+    let mut response = api
         .schema_push(&SchemaPushInput {
-            schema,
+            schema: schema.clone(),
             draft: cmd.draft,
             force: cmd.force,
             accept_data_loss: cmd.continue_with_data_loss,
             migrations_folder_path: cmd.migrations_folder_path.clone(),
         })
         .await?;
+
+    let mut force = cmd.force;
+
+    if let (Some(radical_measure), false) = (&response.radical_measure, cmd.force) {
+        if bool::prompt(&format!("{}\n{}", radical_measure, "[y/n]".bold()))? {
+            force = true;
+            response = api
+                .schema_push(&SchemaPushInput {
+                    schema: schema.clone(),
+                    force,
+                    accept_data_loss: cmd.continue_with_data_loss,
+                    draft: cmd.draft,
+                    migrations_folder_path: cmd.migrations_folder_path.clone(),
+                })
+                .await?
+        }
+    }
 
     if response.warnings.len() > 0 {
         eprintln!("⚠️  {}", "Warnings".bright_yellow().bold());
@@ -266,6 +284,20 @@ async fn schema_push(cmd: &SchemaPush) -> anyhow::Result<()> {
 
         for unexecutable in &response.unexecutable {
             eprintln!("- {}", unexecutable.bright_red())
+        }
+    }
+
+    if response.unexecutable.is_empty() && !response.warnings.is_empty() && !cmd.continue_with_data_loss {
+        if bool::prompt(&format!("Apply the migration anyway?\n{}", "[y/n]".bold()))? {
+            response = api
+                .schema_push(&SchemaPushInput {
+                    schema,
+                    force,
+                    accept_data_loss: true,
+                    draft: cmd.draft,
+                    migrations_folder_path: cmd.migrations_folder_path.clone(),
+                })
+                .await?
         }
     }
 
@@ -302,8 +334,11 @@ async fn schema_push(cmd: &SchemaPush) -> anyhow::Result<()> {
 fn init_logger() {
     use tracing_error::ErrorLayer;
     use tracing_subscriber::prelude::*;
-
     use tracing_subscriber::{EnvFilter, FmtSubscriber};
+
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "debug,sql_schema_describer=info");
+    }
 
     let subscriber = FmtSubscriber::builder()
         .with_env_filter(EnvFilter::from_default_env())

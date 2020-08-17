@@ -130,6 +130,10 @@ impl DatabaseMigrationStepApplier<SqlMigration> for SqlDatabaseStepApplier<'_> {
     }
 
     fn migration_is_empty(&self, migration: &SqlMigration) -> bool {
+        if migration.steps.is_empty() {
+            tracing::debug!("Empty migration: {:#?}", migration.steps);
+        }
+
         migration.steps.is_empty()
     }
 }

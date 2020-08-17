@@ -102,7 +102,7 @@ pub trait MigrationConnector: Send + Sync + 'static {
     ) -> ConnectorResult<()>;
 
     /// Detect drift between the migrations history and the dev database. The filesystem_migrations argument represents the migrations that are supposed to be applied.
-    async fn detect_drift(&self, filesystem_migrations: &[String]) -> ConnectorResult<()>;
+    async fn detect_drift(&self, filesystem_migrations: &[String]) -> ConnectorResult<Option<Self::DatabaseMigration>>;
 }
 
 #[derive(Debug)]

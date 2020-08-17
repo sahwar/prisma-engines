@@ -36,13 +36,25 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
 
         // Create/overwrite the migration file, if the project is using migrations.
         if let Some(path) = input.migrations_folder_path.as_ref().map(std::path::Path::new) {
-            if let Some(radical_measure) = catch_up(path, input.force, connector).await? {
-                return Ok(SchemaPushOutput {
-                    executed_steps: 0,
-                    warnings: Vec::new(),
-                    unexecutable: Vec::new(),
-                    radical_measure: Some(radical_measure),
-                });
+            tracing::debug!("Catching up the database");
+            match catch_up(path, input.force, connector).await? {
+                (Some(radical_measure), _) => {
+                    return Ok(SchemaPushOutput {
+                        executed_steps: 0,
+                        warnings: Vec::new(),
+                        unexecutable: Vec::new(),
+                        radical_measure: Some(radical_measure),
+                    });
+                }
+                (_, false) => {
+                    return Ok(SchemaPushOutput {
+                        executed_steps: 0,
+                        warnings: Vec::new(),
+                        unexecutable: Vec::new(),
+                        radical_measure: None,
+                    })
+                }
+                _ => tracing::debug!("The database is caught up."),
             }
 
             let database_migration = inferrer.infer(&schema, &schema, &[]).await?;
@@ -194,7 +206,12 @@ fn should_apply(checks: &DestructiveChangeDiagnostics, input: &SchemaPushInput) 
 ///
 ///   1. Revert database schema to the migration where they diverge
 ///   2. Apply migrations folder history from there
-async fn catch_up<C, D>(migrations_folder_path: &Path, force: bool, connector: &C) -> CommandResult<Option<String>>
+#[tracing::instrument(skip(connector))]
+async fn catch_up<C, D>(
+    migrations_folder_path: &Path,
+    force: bool,
+    connector: &C,
+) -> CommandResult<(Option<String>, bool)>
 where
     C: MigrationConnector<DatabaseMigration = D>,
     D: DatabaseMigrationMarker + 'static,
@@ -203,12 +220,49 @@ where
 
     let filesystem_migrations =
         list_migrations(migrations_folder_path).map_err(|err| CommandError::Generic(err.into()))?;
+
     let applied_migrations = connector.read_imperative_migrations().await?;
     let diagnostic = diagnose_migrations_history(&filesystem_migrations, &applied_migrations)
         .map_err(|err| CommandError::Generic(err.into()))?;
+    let fs_migration_scripts: Vec<String> = filesystem_migrations
+        .iter()
+        .map(|folder| {
+            folder
+                .read_migration_script()
+                .expect("Failed to read migration script.")
+        })
+        .collect();
+
+    tracing::debug!(?diagnostic);
 
     match diagnostic {
-        HistoryDiagnostic::UpToDate => (),
+        HistoryDiagnostic::UpToDate => match connector.detect_drift(&fs_migration_scripts).await? {
+            Some(drift) => {
+                tracing::warn!("Detected drift between dev database and migrations history.");
+                if force {
+                    tracing::warn!(
+                        "The --force flag was passed, migrating the dev database back on track with the migrations history."
+                    );
+
+                    let mut step = 0;
+
+                    while applier.apply_step(&drift, step).await? {
+                        step += 1;
+                    }
+                } else {
+                    tracing::warn!(
+                        "Pass the --force flag to bring the database back on track with the migrations history."
+                    );
+
+                    return Ok((
+                        Some("Detected drift between dev database and migrations history. Bring them back into sync? (this may imply data loss)".into()),
+                        false
+                    )
+                    );
+                }
+            }
+            None => (),
+        },
         HistoryDiagnostic::DatabaseIsBehind { unapplied_migrations } => {
             for filesystem_migration in unapplied_migrations {
                 tracing::debug!("Applying saved migration `{}`", filesystem_migration.migration_id());
@@ -235,21 +289,14 @@ where
 
             if force {
                 tracing::warn!("Rolling back applied migrations that do not appear in the filesystem.");
-                let fs_migration_scripts: Vec<String> = filesystem_migrations
-                    .iter()
-                    .map(|folder| {
-                        folder
-                            .read_migration_script()
-                            .expect("Failed to read migration script.")
-                    })
-                    .collect();
+
                 connector
                     .revert_to(&fs_migration_scripts, unpersisted_migrations)
                     .await?;
 
                 connector.initialize().await?;
             } else {
-                return Ok(Some(format!("The migrations folder is behind the database — run migrate again with the --force flag to revert the migrations. This will drop all the data in the local database.")));
+                return Ok((Some(format!("The migrations folder is behind the database — run migrate again with the --force flag to revert the migrations. This will drop all the data in the local database.")), false));
             }
         }
         HistoryDiagnostic::HistoriesDiverge {
@@ -261,7 +308,7 @@ where
 
             if !force {
                 // TODO: offer to rebase.
-                return Ok(Some(format!("The history of the migrations from the migrations table and the migrations folder diverge, after the `{}` migration. Please run migrate again with the --force flag to return to a clean history. This will drop all the data in the local database. (TODO: offer to rebase)", filesystem_migrations.get(last_applied_filesystem_migration).expect("get last_applied_filesystem_migration by index").migration_id())));
+                return Ok((Some(format!("The history of the migrations from the migrations table and the migrations folder diverge, after the `{}` migration. Please run migrate again with the --force flag to return to a clean history. This will drop all the data in the local database. (TODO: offer to rebase)", filesystem_migrations.get(last_applied_filesystem_migration).expect("get last_applied_filesystem_migration by index").migration_id())), false));
             }
 
             tracing::warn!(
@@ -309,7 +356,7 @@ where
         }
     }
 
-    Ok(None)
+    Ok((None, true))
 }
 
 #[derive(Debug)]
@@ -326,13 +373,14 @@ enum HistoryDiagnostic<'a> {
     },
 }
 
+#[tracing::instrument]
 fn diagnose_migrations_history<'a>(
     filesystem_migrations_slice: &'a [MigrationFolder],
     applied_migrations_slice: &'a [ImperativeMigration],
 ) -> io::Result<HistoryDiagnostic<'a>> {
     let mut filesystem_migrations = filesystem_migrations_slice.iter().enumerate();
     let mut applied_migrations = applied_migrations_slice.iter().enumerate();
-    let mut last_applied_filesystem_migration: usize = 0;
+    let mut last_applied_filesystem_migration: Option<usize> = None;
     let mut checksum_buf = Vec::with_capacity(6);
 
     while let Some((fs_idx, fs_migration)) = filesystem_migrations.next() {
@@ -340,12 +388,18 @@ fn diagnose_migrations_history<'a>(
 
         match next_applied_migration(&mut applied_migrations) {
             Some(applied_migration) if applied_migration.checksum == checksum_buf => {
-                last_applied_filesystem_migration = fs_idx;
+                last_applied_filesystem_migration = Some(fs_idx);
             }
             Some(_applied_migration) => {
-                return Ok(HistoryDiagnostic::HistoriesDiverge {
-                    last_applied_filesystem_migration,
-                })
+                if let Some(last_applied_filesystem_migration) = last_applied_filesystem_migration {
+                    return Ok(HistoryDiagnostic::HistoriesDiverge {
+                        last_applied_filesystem_migration,
+                    });
+                } else {
+                    return Ok(HistoryDiagnostic::FilesystemIsBehind {
+                        unpersisted_migrations: applied_migrations_slice,
+                    });
+                }
             }
             None => {
                 return Ok(HistoryDiagnostic::DatabaseIsBehind {

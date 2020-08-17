@@ -223,10 +223,11 @@ impl MigrationConnector for SqlMigrationConnector {
         tracing::warn!("Dropping the database to revert migrations.");
 
         self.drop_database().await?;
-        catch(
-            self.database_info().connection_info(),
-            self.flavour.initialize(self.conn(), self.database_info()),
-        )
+        catch(self.database_info().connection_info(), async {
+            let conn = self.conn();
+            self.flavour.initialize(conn, self.database_info()).await?;
+            self.flavour.ensure_imperative_migrations_table(conn).await
+        })
         .await?;
 
         let applier = SqlDatabaseStepApplier { connector: self };
@@ -320,8 +321,11 @@ impl MigrationConnector for SqlMigrationConnector {
         Ok(())
     }
 
-    async fn detect_drift(&self, filesystem_migrations: &[String]) -> ConnectorResult<()> {
+    #[tracing::instrument(skip(self, filesystem_migrations))]
+    async fn detect_drift(&self, filesystem_migrations: &[String]) -> ConnectorResult<Option<Self::DatabaseMigration>> {
         let temporary_db = self.flavour.create_temporary_database().await?;
+
+        tracing::debug!("Applying migration folder migrations to temporary database.");
 
         for migration in filesystem_migrations {
             temporary_db
@@ -343,13 +347,15 @@ impl MigrationConnector for SqlMigrationConnector {
             .map_err(|err| err.into_connector_error(self.connection_info()))?;
 
         let migration = infer(
-            &main_database_schema,
-            &temporary_database_schema,
+            main_database_schema,
+            temporary_database_schema,
             self.database_info(),
             self.flavour.as_ref(),
         );
 
-        Ok(())
+        let migration = Some(migration).filter(|migration| !migration.steps.is_empty());
+
+        Ok(migration)
     }
 }
 
