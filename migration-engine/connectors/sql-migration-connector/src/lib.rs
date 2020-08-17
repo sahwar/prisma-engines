@@ -319,6 +319,38 @@ impl MigrationConnector for SqlMigrationConnector {
 
         Ok(())
     }
+
+    async fn detect_drift(&self, filesystem_migrations: &[String]) -> ConnectorResult<()> {
+        let temporary_db = self.flavour.create_temporary_database().await?;
+
+        for migration in filesystem_migrations {
+            temporary_db
+                .conn
+                .raw_cmd(migration)
+                .await
+                .map_err(SqlError::from)
+                .map_err(|err| err.into_connector_error(self.connection_info()))?;
+        }
+
+        let main_database_schema = self
+            .describe_schema()
+            .await
+            .map_err(|err| err.into_connector_error(self.connection_info()))?;
+
+        let temporary_database_schema = temporary_db
+            .describe(self.flavour.as_ref())
+            .await
+            .map_err(|err| err.into_connector_error(self.connection_info()))?;
+
+        let migration = infer(
+            &main_database_schema,
+            &temporary_database_schema,
+            self.database_info(),
+            self.flavour.as_ref(),
+        );
+
+        Ok(())
+    }
 }
 
 pub(crate) async fn catch<O>(

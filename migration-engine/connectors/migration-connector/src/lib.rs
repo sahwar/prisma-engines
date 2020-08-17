@@ -100,6 +100,9 @@ pub trait MigrationConnector: Send + Sync + 'static {
         filesystem_migrations: &[String],
         to_be_rolled_back: &[ImperativeMigration],
     ) -> ConnectorResult<()>;
+
+    /// Detect drift between the migrations history and the dev database. The filesystem_migrations argument represents the migrations that are supposed to be applied.
+    async fn detect_drift(&self, filesystem_migrations: &[String]) -> ConnectorResult<()>;
 }
 
 #[derive(Debug)]
