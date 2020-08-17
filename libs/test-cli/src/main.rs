@@ -268,6 +268,8 @@ async fn schema_push(cmd: &SchemaPush) -> anyhow::Result<()> {
                     migrations_folder_path: cmd.migrations_folder_path.clone(),
                 })
                 .await?
+        } else {
+            eprintln!("{} {}", "✔️".bold(), "Migration cancelled.".red());
         }
     }
 
@@ -298,6 +300,8 @@ async fn schema_push(cmd: &SchemaPush) -> anyhow::Result<()> {
                     migrations_folder_path: cmd.migrations_folder_path.clone(),
                 })
                 .await?
+        } else {
+            eprintln!("{} {}", "✔️".bold(), "Migration cancelled.".red());
         }
     }
 
@@ -309,24 +313,35 @@ async fn schema_push(cmd: &SchemaPush) -> anyhow::Result<()> {
         eprintln!(
             "{}  {}",
             "✔️".bold(),
-            format!("Schema pushed to database. ({} steps)", response.executed_steps).green()
+            format!(
+                "Migrate executed successfully. ({} new migration steps executed)",
+                response.executed_steps
+            )
+            .green()
         );
-    } else {
-        if response.had_no_changes_to_push() {
-            eprintln!(
-                "{}  {}",
-                "✔️".bold(),
-                "No changes to push. Prisma schema and database are in sync.".green()
-            );
-        } else {
-            eprintln!(
-                "{}  {}",
-                "❌".bold(),
-                "The schema was not pushed. Pass the --continue-with-data-loss flag to ignore warnings."
-            );
-            std::process::exit(1);
-        }
     }
+    // if response.executed_steps > 0 {
+    //     eprintln!(
+    //         "{}  {}",
+    //         "✔️".bold(),
+    //         format!("Schema pushed to database. ({} steps)", response.executed_steps).green()
+    //     );
+    // } else {
+    //     if response.had_no_changes_to_push() {
+    //         eprintln!(
+    //             "{}  {}",
+    //             "✔️".bold(),
+    //             "No changes to push. Prisma schema and database are in sync.".green()
+    //         );
+    //     } else {
+    //         eprintln!(
+    //             "{}  {}",
+    //             "❌".bold(),
+    //             "The schema was not pushed. Pass the --continue-with-data-loss flag to ignore warnings."
+    //         );
+    //         std::process::exit(1);
+    //     }
+    // }
 
     Ok(())
 }

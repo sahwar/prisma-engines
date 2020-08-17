@@ -94,15 +94,6 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
                 .write_migration_script(&script, extension)
                 .map_err(|err| CommandError::Generic(err.into()))?;
 
-            tracing::debug!("Applying new migration `{}`", folder.migration_id());
-            let mut hasher = Sha512::new();
-            hasher.update(&script);
-
-            let checksum = hasher.finalize();
-            connector
-                .persist_imperative_migration_to_table(folder.migration_id(), checksum.as_ref(), &script)
-                .await?;
-
             // Stop here and do not apply the migration if we are in draft mode.
             if input.draft {
                 tracing::info!("Draft migration was saved!");
@@ -114,6 +105,14 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
                 });
             }
 
+            tracing::debug!("Applying new migration `{}`", folder.migration_id());
+            let mut hasher = Sha512::new();
+            hasher.update(&script);
+            let checksum = hasher.finalize();
+
+            connector
+                .persist_imperative_migration_to_table(folder.migration_id(), checksum.as_ref(), &script)
+                .await?;
             applier.apply_migration_script(&script, &checksum).await?;
 
             Ok(SchemaPushOutput {
@@ -233,7 +232,7 @@ where
         })
         .collect();
 
-    tracing::debug!(?diagnostic);
+    tracing::debug!(diagnostic = diagnostic.short());
 
     match diagnostic {
         HistoryDiagnostic::UpToDate => match connector.detect_drift(&fs_migration_scripts).await? {
@@ -241,7 +240,7 @@ where
                 tracing::warn!("Detected drift between dev database and migrations history.");
                 if force {
                     tracing::warn!(
-                        "The --force flag was passed, migrating the dev database back on track with the migrations history."
+                        "The force flag was passed, migrating the dev database back on track with the migrations history."
                     );
 
                     let mut step = 0;
@@ -250,9 +249,7 @@ where
                         step += 1;
                     }
                 } else {
-                    tracing::warn!(
-                        "Pass the --force flag to bring the database back on track with the migrations history."
-                    );
+                    tracing::warn!("The database will be brought back on track with the migrations history.");
 
                     return Ok((
                         Some("Detected drift between dev database and migrations history. Bring them back into sync? (this may imply data loss)".into()),
@@ -296,7 +293,7 @@ where
 
                 connector.initialize().await?;
             } else {
-                return Ok((Some(format!("The migrations folder is behind the database — run migrate again with the --force flag to revert the migrations. This will drop all the data in the local database.")), false));
+                return Ok((Some(format!("The migrations folder is behind the database. The migrations that are not in the folder will be reverted. This will drop all the data in the local database.")), false));
             }
         }
         HistoryDiagnostic::HistoriesDiverge {
@@ -307,8 +304,15 @@ where
                 .expect("Last applied fs migration");
 
             if !force {
-                // TODO: offer to rebase.
-                return Ok((Some(format!("The history of the migrations from the migrations table and the migrations folder diverge, after the `{}` migration. Please run migrate again with the --force flag to return to a clean history. This will drop all the data in the local database. (TODO: offer to rebase)", filesystem_migrations.get(last_applied_filesystem_migration).expect("get last_applied_filesystem_migration by index").migration_id())), false));
+                if last_applied_filesystem_migration == applied_migrations.len() - 2
+                    && last_applied_filesystem_migration == filesystem_migrations.len() - 2
+                    && applied_migrations[last_applied_filesystem_migration + 1].name
+                        == filesystem_migrations[last_applied_filesystem_migration + 1].migration_id()
+                {
+                    return Ok((Some(format!("The last migration was edited. It will be reverted and applied again. All data in the local database will be lost.")), false));
+                }
+
+                return Ok((Some(format!("The history of the migrations from the migrations table and the migrations folder diverge, after the `{}` migration. The database will be returned to a clean history. This will drop all the data in the local database. (TODO: offer to rebase)", filesystem_migrations.get(last_applied_filesystem_migration).expect("get last_applied_filesystem_migration by index").migration_id())), false));
             }
 
             tracing::warn!(
@@ -373,6 +377,17 @@ enum HistoryDiagnostic<'a> {
     },
 }
 
+impl HistoryDiagnostic<'_> {
+    fn short(&self) -> &'static str {
+        match self {
+            HistoryDiagnostic::UpToDate => "UpToDate",
+            HistoryDiagnostic::DatabaseIsBehind { .. } => "DatabaseIsBehind",
+            HistoryDiagnostic::FilesystemIsBehind { .. } => "FilesystemIsBehind",
+            HistoryDiagnostic::HistoriesDiverge { .. } => "HistoriesDiverge",
+        }
+    }
+}
+
 #[tracing::instrument]
 fn diagnose_migrations_history<'a>(
     filesystem_migrations_slice: &'a [MigrationFolder],
@@ -395,11 +410,11 @@ fn diagnose_migrations_history<'a>(
                     return Ok(HistoryDiagnostic::HistoriesDiverge {
                         last_applied_filesystem_migration,
                     });
-                } else {
-                    return Ok(HistoryDiagnostic::FilesystemIsBehind {
-                        unpersisted_migrations: applied_migrations_slice,
-                    });
                 }
+
+                return Ok(HistoryDiagnostic::FilesystemIsBehind {
+                    unpersisted_migrations: applied_migrations_slice,
+                });
             }
             None => {
                 return Ok(HistoryDiagnostic::DatabaseIsBehind {
@@ -460,6 +475,9 @@ pub struct SchemaPushOutput {
 
 impl SchemaPushOutput {
     pub fn had_no_changes_to_push(&self) -> bool {
-        self.warnings.is_empty() && self.unexecutable.is_empty() && self.executed_steps == 0
+        self.warnings.is_empty()
+            && self.unexecutable.is_empty()
+            && self.executed_steps == 0
+            && self.radical_measure.is_none()
     }
 }
