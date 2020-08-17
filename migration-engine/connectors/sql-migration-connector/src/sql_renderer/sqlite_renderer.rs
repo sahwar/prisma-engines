@@ -4,6 +4,7 @@ use crate::{
     flavour::{SqlFlavour, SqliteFlavour},
     sql_database_step_applier::render_create_index,
     sql_schema_differ::{ColumnDiffer, SqlSchemaDiffer, TableDiffer},
+    AlterEnum,
 };
 use once_cell::sync::Lazy;
 use prisma_value::PrismaValue;
@@ -14,6 +15,15 @@ use std::borrow::Cow;
 impl SqlRenderer for SqliteFlavour {
     fn quote<'a>(&self, name: &'a str) -> Quoted<&'a str> {
         Quoted::Double(name)
+    }
+
+    fn render_alter_enum(
+        &self,
+        _alter_enum: &AlterEnum,
+        _differ: &SqlSchemaDiffer<'_>,
+        _schema_name: &str,
+    ) -> anyhow::Result<Vec<String>> {
+        unreachable!("render_alter_enum on sqlite")
     }
 
     fn render_column(&self, _schema_name: &str, column: ColumnWalker<'_>, _add_fk_prefix: bool) -> String {
@@ -79,6 +89,52 @@ impl SqlRenderer for SqliteFlavour {
         Vec::new()
     }
 
+    fn render_create_table(&self, table: &TableWalker<'_>, schema_name: &str) -> anyhow::Result<String> {
+        use std::fmt::Write;
+
+        let columns: String = table
+            .columns()
+            .map(|column| self.render_column(&schema_name, column, false))
+            .join(",\n");
+
+        let primary_key_is_already_set = columns.contains("PRIMARY KEY");
+        let primary_columns = table.table.primary_key_columns();
+
+        let primary_key = if !primary_columns.is_empty() && !primary_key_is_already_set {
+            let column_names = primary_columns.iter().map(|col| self.quote(&col)).join(",");
+            format!(",\nPRIMARY KEY ({})", column_names)
+        } else {
+            String::new()
+        };
+
+        let foreign_keys = if !table.table.foreign_keys.is_empty() {
+            let mut fks = table.table.foreign_keys.iter().peekable();
+            let mut rendered_fks = String::new();
+
+            while let Some(fk) = fks.next() {
+                writeln!(
+                    rendered_fks,
+                    "FOREIGN KEY ({constrained_columns}) {references}{comma}",
+                    constrained_columns = fk.columns.iter().map(|col| format!(r#""{}""#, col)).join(","),
+                    references = self.render_references(&schema_name, fk),
+                    comma = if fks.peek().is_some() { ",\n" } else { "" },
+                )?;
+            }
+
+            format!(",\n{fks}", fks = rendered_fks)
+        } else {
+            String::new()
+        };
+
+        Ok(format!(
+            "CREATE TABLE {table_name} (\n{columns}{foreign_keys}{primary_key}\n)",
+            table_name = self.quote_with_schema(&schema_name, table.name()),
+            columns = columns,
+            foreign_keys = foreign_keys,
+            primary_key = primary_key,
+        ))
+    }
+
     fn render_drop_enum(&self, _drop_enum: &crate::DropEnum) -> Vec<String> {
         Vec::new()
     }
@@ -116,7 +172,7 @@ impl SqlRenderer for SqliteFlavour {
 
             // TODO start transaction now. Unclear if we really want to do that.
             result.push(
-                self.render_create_table(&temporary_table, schema_name, sql_family)
+                self.render_create_table(&temporary_table, schema_name)
                     .expect("render_create_table"),
             );
 

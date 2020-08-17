@@ -4,6 +4,7 @@ use crate::{
     expanded_alter_column::{expand_mysql_alter_column, MysqlAlterColumn},
     flavour::{MysqlFlavour, SqlFlavour},
     sql_schema_differ::{ColumnChanges, ColumnDiffer, SqlSchemaDiffer},
+    AlterEnum,
 };
 use once_cell::sync::Lazy;
 use prisma_value::PrismaValue;
@@ -11,12 +12,45 @@ use regex::Regex;
 use sql_schema_describer::walkers::ColumnWalker;
 use sql_schema_describer::*;
 use std::borrow::Cow;
+use walkers::{walk_columns, TableWalker};
 
 const VARCHAR_LENGTH_PREFIX: &str = "(191)";
 
 impl SqlRenderer for MysqlFlavour {
     fn quote<'a>(&self, name: &'a str) -> Quoted<&'a str> {
         Quoted::Backticks(name)
+    }
+
+    fn render_alter_enum(
+        &self,
+        alter_enum: &AlterEnum,
+        differ: &SqlSchemaDiffer<'_>,
+        schema_name: &str,
+    ) -> anyhow::Result<Vec<String>> {
+        let column = walk_columns(differ.next)
+            .find(|col| match &col.column_type().family {
+                ColumnTypeFamily::Enum(enum_name) if enum_name.as_str() == alter_enum.name.as_str() => true,
+                _ => false,
+            })
+            .ok_or_else(|| anyhow::anyhow!("Could not find column to alter for {:?}", alter_enum))?;
+        let enum_variants = differ
+            .next
+            .get_enum(&alter_enum.name)
+            .ok_or_else(|| anyhow::anyhow!("Couldn't find enum {:?}", alter_enum.name))?
+            .values
+            .iter()
+            .map(Quoted::mysql_string)
+            .join(", ");
+
+        let change_column = format!(
+            "ALTER TABLE {schema_name}.{table_name} CHANGE {column_name} {column_name} ENUM({enum_variants})",
+            schema_name = Quoted::mysql_ident(schema_name),
+            table_name = Quoted::mysql_ident(column.table().name()),
+            column_name = column.name(),
+            enum_variants = enum_variants,
+        );
+
+        Ok(vec![change_column])
     }
 
     fn render_column(&self, _schema_name: &str, column: ColumnWalker<'_>, _add_fk_prefix: bool) -> String {
@@ -101,6 +135,51 @@ impl SqlRenderer for MysqlFlavour {
 
     fn render_create_enum(&self, _create_enum: &crate::CreateEnum) -> Vec<String> {
         Vec::new() // enums are defined on each column that uses them on MySQL
+    }
+
+    fn render_create_table(&self, table: &TableWalker<'_>, schema_name: &str) -> anyhow::Result<String> {
+        let columns: String = table
+            .columns()
+            .map(|column| self.render_column(&schema_name, column, false))
+            .join(",\n");
+
+        let primary_columns = table.table.primary_key_columns();
+
+        let primary_key = if !primary_columns.is_empty() {
+            let column_names = primary_columns.iter().map(|col| self.quote(&col)).join(",");
+            format!(",\nPRIMARY KEY ({})", column_names)
+        } else {
+            String::new()
+        };
+
+        let indexes = if !table.table.indices.is_empty() {
+            let indices: String = table
+                .table
+                .indices
+                .iter()
+                .map(|index| {
+                    let tpe = if index.is_unique() { "UNIQUE " } else { "" };
+                    format!(
+                        "{}Index {}({})",
+                        tpe,
+                        self.quote(&index.name),
+                        index.columns.iter().map(|col| self.quote(&col)).join(",\n")
+                    )
+                })
+                .join(",\n");
+
+            format!(",\n{}", indices)
+        } else {
+            String::new()
+        };
+
+        Ok(format!(
+            "CREATE TABLE {} (\n{columns}{indexes}{primary_key}\n) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+            table_name = self.quote_with_schema(&schema_name, table.name()),
+            columns = columns,
+            primary_key = primary_key,
+            indexes = indexes
+        ))
     }
 
     fn render_drop_enum(&self, _drop_enum: &crate::DropEnum) -> Vec<String> {
