@@ -88,7 +88,7 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
 
             let checksum = hasher.finalize();
             connector
-                .persist_imperative_migration(folder.migration_id(), checksum.as_ref(), &script)
+                .persist_imperative_migration_to_table(folder.migration_id(), checksum.as_ref(), &script)
                 .await?;
 
             // Stop here and do not apply the migration if we are in draft mode.
@@ -221,7 +221,7 @@ where
                 let checksum = hasher.finalize();
 
                 connector
-                    .persist_imperative_migration(filesystem_migration.migration_id(), &checksum, &script)
+                    .persist_imperative_migration_to_table(filesystem_migration.migration_id(), &checksum, &script)
                     .await?;
 
                 applier.apply_migration_script(&script, &checksum).await?;
@@ -301,7 +301,7 @@ where
                 let checksum = hasher.finalize();
 
                 connector
-                    .persist_imperative_migration(filesystem_migration.migration_id(), &checksum, &script)
+                    .persist_imperative_migration_to_table(filesystem_migration.migration_id(), &checksum, &script)
                     .await?;
 
                 applier.apply_migration_script(&script, &checksum).await?;

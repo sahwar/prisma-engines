@@ -148,7 +148,12 @@ impl MigrationConnector for SqlMigrationConnector {
         serde_json::from_value(json).ok()
     }
 
-    async fn persist_imperative_migration(&self, name: &str, checksum: &[u8], script: &str) -> ConnectorResult<()> {
+    async fn persist_imperative_migration_to_table(
+        &self,
+        name: &str,
+        checksum: &[u8],
+        script: &str,
+    ) -> ConnectorResult<()> {
         let fut = async {
             self.ensure_imperative_migrations_table().await?;
 
