@@ -215,9 +215,10 @@ impl MigrationConnector for SqlMigrationConnector {
         catch(self.connection_info(), fut).await
     }
 
+    #[tracing::instrument(skip(self, filesystem_migrations, _to_be_rolled_back))]
     async fn revert_to(
         &self,
-        filesystem_migrations: &[String],
+        filesystem_migrations: &[(String, String)],
         _to_be_rolled_back: &[ImperativeMigration],
     ) -> ConnectorResult<()> {
         tracing::warn!("Dropping the database to revert migrations.");
@@ -232,9 +233,15 @@ impl MigrationConnector for SqlMigrationConnector {
 
         let applier = SqlDatabaseStepApplier { connector: self };
 
-        // apply all the migrations
-        for script in filesystem_migrations {
+        tracing::info!(
+            "Database dropped and recreated. Now applying {} migration scripts.",
+            filesystem_migrations.len()
+        );
+
+        for (name, script) in filesystem_migrations {
             let checksum = migration_script_checksum(&script);
+            self.persist_imperative_migration_to_table(&name, &checksum, script)
+                .await?;
             applier.apply_migration_script(script, &checksum).await?;
         }
 
@@ -322,12 +329,15 @@ impl MigrationConnector for SqlMigrationConnector {
     }
 
     #[tracing::instrument(skip(self, filesystem_migrations))]
-    async fn detect_drift(&self, filesystem_migrations: &[String]) -> ConnectorResult<Option<Self::DatabaseMigration>> {
+    async fn detect_drift(
+        &self,
+        filesystem_migrations: &[(String, String)],
+    ) -> ConnectorResult<Option<Self::DatabaseMigration>> {
         let temporary_db = self.flavour.create_temporary_database().await?;
 
         tracing::debug!("Applying migration folder migrations to temporary database.");
 
-        for migration in filesystem_migrations {
+        for (_name, migration) in filesystem_migrations {
             temporary_db
                 .conn
                 .raw_cmd(migration)

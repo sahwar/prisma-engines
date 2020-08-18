@@ -60,8 +60,9 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
             let database_migration = inferrer.infer(&schema, &schema, &[]).await?;
             let checks = checker.check(&database_migration).await?;
             let pure_checks = checker.pure_check(&database_migration);
+            let (extension, script) = applier.render_migration_script(&database_migration, &pure_checks);
 
-            if applier.migration_is_empty(&database_migration) {
+            if applier.migration_is_empty(&database_migration) || script.is_empty() {
                 tracing::info!("The generated database migration is empty.");
                 return Ok(SchemaPushOutput {
                     executed_steps: 0,
@@ -79,8 +80,6 @@ impl<'a> MigrationCommand for SchemaPushCommand<'a> {
                     radical_measure: None,
                 });
             }
-
-            let (extension, script) = applier.render_migration_script(&database_migration, &pure_checks);
 
             if !path.exists() {
                 return Err(CommandError::Input(anyhow::anyhow!(
@@ -223,12 +222,15 @@ where
     let applied_migrations = connector.read_imperative_migrations().await?;
     let diagnostic = diagnose_migrations_history(&filesystem_migrations, &applied_migrations)
         .map_err(|err| CommandError::Generic(err.into()))?;
-    let fs_migration_scripts: Vec<String> = filesystem_migrations
+    let fs_migration_scripts: Vec<(String, String)> = filesystem_migrations
         .iter()
         .map(|folder| {
-            folder
-                .read_migration_script()
-                .expect("Failed to read migration script.")
+            (
+                folder.migration_id().to_owned(),
+                folder
+                    .read_migration_script()
+                    .expect("Failed to read migration script."),
+            )
         })
         .collect();
 
@@ -280,7 +282,10 @@ where
         }
         HistoryDiagnostic::FilesystemIsBehind { unpersisted_migrations } => {
             tracing::info!(
-                ?unpersisted_migrations,
+                unpersisted_migrations = ?unpersisted_migrations
+                    .iter()
+                    .map(|mig| mig.name.clone())
+                    .collect::<Vec<String>>(),
                 "The filesystem migrations are behind the migrations applied to the database."
             );
 
@@ -320,43 +325,49 @@ where
                 last_applied_fs_migration.migration_id()
             );
 
-            let common_fs_migrations: Vec<String> = filesystem_migrations[..last_applied_filesystem_migration]
+            let common_fs_migrations: Vec<(String, String)> = filesystem_migrations
+                [..=last_applied_filesystem_migration]
                 .iter()
-                .map(|mig| mig.read_migration_script().expect("read mig script"))
+                .map(|mig| {
+                    (
+                        mig.migration_id().to_owned(),
+                        mig.read_migration_script().expect("read mig script"),
+                    )
+                })
                 .collect();
 
             // Revert
             connector
                 .revert_to(
-                    &common_fs_migrations,
+                    &fs_migration_scripts,
                     &applied_migrations[last_applied_filesystem_migration..],
                 )
                 .await?;
 
             tracing::info!("Reverted!");
 
-            // Reapply
-            let unapplied_migrations = &filesystem_migrations[last_applied_filesystem_migration..];
+            // // Reapply
+            // let unapplied_migrations = &filesystem_migrations[(last_applied_filesystem_migration + 1)..];
 
-            for filesystem_migration in unapplied_migrations {
-                tracing::debug!(
-                    "Applying migration from migrations folder: `{}`",
-                    filesystem_migration.migration_id()
-                );
-                let script = filesystem_migration
-                    .read_migration_script()
-                    .map_err(|err| CommandError::Generic(err.into()))?;
+            // for filesystem_migration in unapplied_migrations {
+            //     tracing::debug!(
+            //         "Applying migration from migrations folder: `{}`",
+            //         filesystem_migration.migration_id()
+            //     );
+            //     let script = filesystem_migration
+            //         .read_migration_script()
+            //         .map_err(|err| CommandError::Generic(err.into()))?;
 
-                let mut hasher = Sha512::new();
-                hasher.update(&script);
-                let checksum = hasher.finalize();
+            //     let mut hasher = Sha512::new();
+            //     hasher.update(&script);
+            //     let checksum = hasher.finalize();
 
-                connector
-                    .persist_imperative_migration_to_table(filesystem_migration.migration_id(), &checksum, &script)
-                    .await?;
+            //     connector
+            //         .persist_imperative_migration_to_table(filesystem_migration.migration_id(), &checksum, &script)
+            //         .await?;
 
-                applier.apply_migration_script(&script, &checksum).await?;
-            }
+            //     applier.apply_migration_script(&script, &checksum).await?;
+            // }
         }
     }
 
