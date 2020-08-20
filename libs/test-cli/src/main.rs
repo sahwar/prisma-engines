@@ -8,31 +8,31 @@ use structopt::*;
 #[derive(StructOpt)]
 #[structopt(version = env!("GIT_HASH"))]
 enum Command {
-    /// Apply a prisma schema to a database
-    ApplySchema {
-        /// The path to the prisma schema file. Either this or --stdin should be provided.
-        #[structopt(long)]
-        file_path: Option<String>,
-        /// Try to read the prisma schema from stdin. Either this or --file-path should be provided.
-        #[structopt(long)]
-        stdin: bool,
-        /// Whether to ignore warnings from the migration engine regarding data loss. Default: false.
-        #[structopt(long)]
-        force: Option<bool>,
-    },
-    /// Introspect a database
-    Introspect {
-        /// URL of the database to introspect.
-        #[structopt(long)]
-        url: Option<String>,
-        /// Path to the schema file to introspect for.
-        #[structopt(long = "file-path")]
-        file_path: Option<String>,
-    },
-    /// Generate DMMF from a schema, or directly from a database URl.
-    Dmmf(DmmfCommand),
-    /// Push a prisma schema directly to the database, without interacting with migrations.
-    SchemaPush(SchemaPush),
+    // /// Apply a prisma schema to a database
+    // ApplySchema {
+    //     /// The path to the prisma schema file. Either this or --stdin should be provided.
+    //     #[structopt(long)]
+    //     file_path: Option<String>,
+    //     /// Try to read the prisma schema from stdin. Either this or --file-path should be provided.
+    //     #[structopt(long)]
+    //     stdin: bool,
+    //     /// Whether to ignore warnings from the migration engine regarding data loss. Default: false.
+    //     #[structopt(long)]
+    //     force: Option<bool>,
+    // },
+    // /// Introspect a database
+    // Introspect {
+    //     /// URL of the database to introspect.
+    //     #[structopt(long)]
+    //     url: Option<String>,
+    //     /// Path to the schema file to introspect for.
+    //     #[structopt(long = "file-path")]
+    //     file_path: Option<String>,
+    // },
+    // /// Generate DMMF from a schema, or directly from a database URl.
+    // Dmmf(DmmfCommand),
+    /// Migrate the database.
+    Migrate(Migrate),
 }
 
 #[derive(StructOpt)]
@@ -50,7 +50,7 @@ struct DmmfCommand {
 }
 
 #[derive(StructOpt)]
-struct SchemaPush {
+struct Migrate {
     /// The path to the prisma schema file.
     schema_path: String,
     /// Generate a migration without executing it.
@@ -72,78 +72,78 @@ async fn main() -> anyhow::Result<()> {
     init_logger();
 
     match Command::from_args() {
-        Command::Dmmf(cmd) => generate_dmmf(&cmd).await?,
-        Command::SchemaPush(cmd) => schema_push(&cmd).await?,
-        Command::Introspect { url, file_path } => {
-            if url.as_ref().xor(file_path.as_ref()).is_none() {
-                anyhow::bail!(
-                    "{}",
-                    "Exactly one of --url or --file-path must be provided".bold().red()
-                );
-            }
+        // Command::Dmmf(cmd) => generate_dmmf(&cmd).await?,
+        Command::Migrate(cmd) => schema_push(&cmd).await?,
+        // Command::Introspect { url, file_path } => {
+        //     if url.as_ref().xor(file_path.as_ref()).is_none() {
+        //         anyhow::bail!(
+        //             "{}",
+        //             "Exactly one of --url or --file-path must be provided".bold().red()
+        //         );
+        //     }
 
-            let schema = if let Some(file_path) = file_path {
-                read_datamodel_from_file(&file_path)?
-            } else if let Some(url) = url {
-                minimal_schema_from_url(&url)?
-            } else {
-                unreachable!()
-            };
-            //todo configurable
-            let introspected = introspection_core::RpcImpl::introspect_internal(schema, false, false)
-                .await
-                .map_err(|err| anyhow::anyhow!("{:?}", err.data))?;
+        //     let schema = if let Some(file_path) = file_path {
+        //         read_datamodel_from_file(&file_path)?
+        //     } else if let Some(url) = url {
+        //         minimal_schema_from_url(&url)?
+        //     } else {
+        //         unreachable!()
+        //     };
+        //     //todo configurable
+        //     let introspected = introspection_core::RpcImpl::introspect_internal(schema, false, false)
+        //         .await
+        //         .map_err(|err| anyhow::anyhow!("{:?}", err.data))?;
 
-            println!("{}", introspected);
-        }
-        Command::ApplySchema {
-            file_path,
-            force,
-            stdin,
-        } => {
-            let datamodel_string: String = match (file_path, stdin) {
-                (Some(path), false) => read_datamodel_from_file(&path).context("error reading the schemafile")?,
-                (None, true) => read_datamodel_from_stdin()?,
-                (Some(_), true) => {
-                    anyhow::bail!("{}", "please pass either --stdin or --file-path, not both".bold().red())
-                }
-                (None, false) => anyhow::bail!("{}", "either --stdin or --file-path is required".bold().red()),
-            };
+        //     println!("{}", introspected);
+        // }
+        // Command::ApplySchema {
+        //     file_path,
+        //     force,
+        //     stdin,
+        // } => {
+        //     let datamodel_string: String = match (file_path, stdin) {
+        //         (Some(path), false) => read_datamodel_from_file(&path).context("error reading the schemafile")?,
+        //         (None, true) => read_datamodel_from_stdin()?,
+        //         (Some(_), true) => {
+        //             anyhow::bail!("{}", "please pass either --stdin or --file-path, not both".bold().red())
+        //         }
+        //         (None, false) => anyhow::bail!("{}", "either --stdin or --file-path is required".bold().red()),
+        //     };
 
-            let api = migration_core::migration_api(&datamodel_string).await?;
+        //     let api = migration_core::migration_api(&datamodel_string).await?;
 
-            let migration_id = "test-cli-migration".to_owned();
+        //     let migration_id = "test-cli-migration".to_owned();
 
-            let infer_input = migration_core::InferMigrationStepsInput {
-                assume_applied_migrations: Some(Vec::new()),
-                assume_to_be_applied: Some(Vec::new()),
-                datamodel: datamodel_string.clone(),
-                migration_id: migration_id.clone(),
-            };
+        //     let infer_input = migration_core::InferMigrationStepsInput {
+        //         assume_applied_migrations: Some(Vec::new()),
+        //         assume_to_be_applied: Some(Vec::new()),
+        //         datamodel: datamodel_string.clone(),
+        //         migration_id: migration_id.clone(),
+        //     };
 
-            api.reset(&serde_json::Value::Null).await?;
+        //     api.reset(&serde_json::Value::Null).await?;
 
-            let result = api.infer_migration_steps(&infer_input).await?;
+        //     let result = api.infer_migration_steps(&infer_input).await?;
 
-            let apply_input = migration_core::ApplyMigrationInput {
-                force,
-                migration_id,
-                steps: result.datamodel_steps,
-            };
+        //     let apply_input = migration_core::ApplyMigrationInput {
+        //         force,
+        //         migration_id,
+        //         steps: result.datamodel_steps,
+        //     };
 
-            let result = api.apply_migration(&apply_input).await?;
-            let warnings: Vec<_> = result.warnings.into_iter().map(|warning| warning.description).collect();
+        //     let result = api.apply_migration(&apply_input).await?;
+        //     let warnings: Vec<_> = result.warnings.into_iter().map(|warning| warning.description).collect();
 
-            if warnings.is_empty() {
-                eprintln!("{}", "✔️  migrated without warning".bold().green());
-            } else {
-                for warning in warnings {
-                    eprintln!("{} - {}", "⚠️ MIGRATION WARNING ⚠️ ".bold().red(), warning)
-                }
+        //     if warnings.is_empty() {
+        //         eprintln!("{}", "✔️  migrated without warning".bold().green());
+        //     } else {
+        //         for warning in warnings {
+        //             eprintln!("{} - {}", "⚠️ MIGRATION WARNING ⚠️ ".bold().red(), warning)
+        //         }
 
-                std::process::exit(1);
-            }
-        }
+        //         std::process::exit(1);
+        //     }
+        // }
     }
 
     Ok(())
@@ -240,7 +240,7 @@ async fn generate_dmmf(cmd: &DmmfCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn schema_push(cmd: &SchemaPush) -> anyhow::Result<()> {
+async fn schema_push(cmd: &Migrate) -> anyhow::Result<()> {
     let schema = read_datamodel_from_file(&cmd.schema_path).context("Error reading the schema from file")?;
     let api = migration_core::migration_api(&schema).await?;
 
