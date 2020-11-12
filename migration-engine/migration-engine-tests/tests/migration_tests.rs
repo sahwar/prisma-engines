@@ -1074,7 +1074,7 @@ async fn adding_an_inline_relation_must_result_in_a_foreign_key_in_the_model_tab
     Ok(())
 }
 
-#[test_each_connector]
+#[test_each_connector(log = "debug")]
 async fn specifying_a_db_name_for_an_inline_relation_must_work(api: &TestApi) {
     let dm1 = r#"
         model A {
