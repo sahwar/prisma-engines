@@ -15,7 +15,7 @@ use regex::Regex;
 use sql_ddl::mysql as ddl;
 use sql_schema_describer::{
     walkers::{ColumnWalker, EnumWalker, ForeignKeyWalker, IndexWalker, TableWalker},
-    ColumnTypeFamily, DefaultKind, DefaultValue, SqlSchema,
+    ColumnTypeFamily, DefaultKind, DefaultValue, ForeignKeyAction, SqlSchema,
 };
 use std::borrow::Cow;
 
@@ -43,6 +43,13 @@ impl SqlRenderer for MysqlFlavour {
                     .map(String::as_str)
                     .map(Cow::Borrowed)
                     .collect(),
+                on_delete: Some(match foreign_key.on_delete_action() {
+                    ForeignKeyAction::Cascade => ddl::OnDelete::Cascade,
+                    ForeignKeyAction::NoAction => ddl::OnDelete::DoNothing,
+                    ForeignKeyAction::Restrict => ddl::OnDelete::Restrict,
+                    ForeignKeyAction::SetDefault => ddl::OnDelete::SetDefault,
+                    ForeignKeyAction::SetNull => ddl::OnDelete::SetNull,
+                }),
             })],
         }
         .to_string()
@@ -314,6 +321,10 @@ impl SqlRenderer for MysqlFlavour {
             }],
         }
         .to_string()
+    }
+
+    fn render_create_table(&self, table: &TableWalker<'_>) -> String {
+        self.render_create_table_as(table, table.name())
     }
 }
 

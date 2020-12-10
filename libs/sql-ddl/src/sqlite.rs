@@ -189,12 +189,14 @@ mod tests {
             ..Default::default()
         };
 
-        let expected = r#"
-CREATE TABLE "Cat" (
-    "id" integer PRIMARY KEY,
-    "boxId" uuid
-)
-"#;
+        let expected = indoc::indoc!(
+            r#"
+            CREATE TABLE "Cat" (
+                "id" integer PRIMARY KEY,
+                "boxId" uuid
+            )
+            "#
+        );
 
         assert_eq!(create_table.to_string(), expected.trim_matches('\n'))
     }

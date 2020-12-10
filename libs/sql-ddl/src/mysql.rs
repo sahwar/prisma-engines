@@ -61,6 +61,7 @@ pub struct ForeignKey<'a> {
     pub constrained_columns: Vec<Cow<'a, str>>,
     pub referenced_table: Cow<'a, str>,
     pub referenced_columns: Vec<Cow<'a, str>>,
+    pub on_delete: Option<OnDelete>,
 }
 
 impl<'a> Display for ForeignKey<'a> {
@@ -94,6 +95,27 @@ impl<'a> Display for ForeignKey<'a> {
         }
 
         f.write_str(")")
+    }
+}
+
+#[derive(Debug)]
+pub enum OnDelete {
+    Cascade,
+    DoNothing,
+    Restrict,
+    SetDefault,
+    SetNull,
+}
+
+impl Display for OnDelete {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OnDelete::Cascade => write!(f, "ON DELETE CASCADE"),
+            OnDelete::Restrict => write!(f, "ON DELETE RESTRICT"),
+            OnDelete::DoNothing => write!(f, "ON DELETE DO NOTHING"),
+            OnDelete::SetNull => write!(f, "ON DELETE SET NULL"),
+            OnDelete::SetDefault => write!(f, "ON DELETE SET DEFAULT"),
+        }
     }
 }
 
@@ -164,6 +186,7 @@ mod tests {
                 constrained_columns: vec!["bestFriendId".into()],
                 referenced_columns: vec!["id".into()],
                 referenced_table: "Dog".into(),
+                on_delete: Default::default(),
             })],
         };
 
