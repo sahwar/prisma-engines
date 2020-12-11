@@ -4,6 +4,9 @@
 
 use std::fmt;
 
+use native_types::NativeType;
+use serde::de::DeserializeOwned;
+
 use crate::{
     Column, ColumnArity, ColumnType, ColumnTypeFamily, DefaultValue, Enum, ForeignKey, ForeignKeyAction, Index,
     IndexType, PrimaryKey, SqlSchema, Table,
@@ -84,6 +87,18 @@ impl<'a> ColumnWalker<'a> {
     /// The full column type.
     pub fn column_type(&self) -> &'a ColumnType {
         &self.column().tpe
+    }
+
+    /// The column native type.
+    pub fn column_native_type<T>(&self) -> Option<T>
+    where
+        T: DeserializeOwned,
+    {
+        self.column()
+            .tpe
+            .native_type
+            .as_ref()
+            .map(|val| serde_json::from_value(val.clone()).unwrap())
     }
 
     /// Is this column an auto-incrementing integer?
