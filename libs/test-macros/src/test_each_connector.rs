@@ -135,6 +135,10 @@ pub fn test_each_connector_impl(attr: TokenStream, input: TokenStream) -> TokenS
         Err(err) => return err.write_errors().into(),
     };
 
+    if test_function.sig.asyncness.is_none() {
+        return test_each_connector_sync_impl(&test_function, &args);
+    }
+
     let tests = test_each_connector_async_wrapper_functions(&args, &test_function);
 
     let optional_logging_import = args.log.as_ref().map(|_| {
@@ -174,6 +178,34 @@ pub fn test_each_connector_impl(attr: TokenStream, input: TokenStream) -> TokenS
 
         #test_function
     };
+
+    output.into()
+}
+
+fn test_each_connector_sync_impl(test_fn: &ItemFn, args: &TestEachConnectorArgs) -> TokenStream {
+    let mut tests = Vec::new();
+
+    for connector in args.connectors_to_test() {
+        let test = quote!(
+            #[test]
+            fn #connector_test_fn_name() {
+                let test_api_args = test_setup::TestAPIArgs::new(#test_fn_name_str, #tags);
+                super::#testfn_name(&api).unwrap();
+            }
+        );
+
+        tests.push(test)
+    }
+
+    if tests.is_empty() && TAGS_FILTER.is_empty() {
+        return syn::Error::new_spanned(test_fn, "All connectors were filtered out for this test.")
+            .to_compile_error()
+            .into();
+    }
+
+    let output = quote!(
+        #(#tests)*
+    );
 
     output.into()
 }
