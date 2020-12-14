@@ -184,13 +184,19 @@ pub fn test_each_connector_impl(attr: TokenStream, input: TokenStream) -> TokenS
 
 fn test_each_connector_sync_impl(test_fn: &ItemFn, args: &TestEachConnectorArgs) -> TokenStream {
     let mut tests = Vec::new();
+    let test_fn_name_str = test_fn.sig.ident.to_string();
+    let test_fn_name = &test_fn.sig.ident;
 
     for connector in args.connectors_to_test() {
+        let connector_test_fn_name = Ident::new(connector.name(), Span::call_site());
+        let tags = connector.tags.bits();
+
         let test = quote!(
             #[test]
             fn #connector_test_fn_name() {
+                let api = test_api_sync();
                 let test_api_args = test_setup::TestAPIArgs::new(#test_fn_name_str, #tags);
-                super::#testfn_name(&api).unwrap();
+                super::#test_fn_name(&api).unwrap();
             }
         );
 
